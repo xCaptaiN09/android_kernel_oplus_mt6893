@@ -6,6 +6,7 @@
 #include <linux/utsname.h>
 #include <linux/hashtable.h>
 #include <linux/path.h>
+#include <linux/stat.h>
 #include <linux/susfs_def.h>
 
 #define SUSFS_VERSION "v1.5.5"
@@ -165,6 +166,30 @@ void susfs_spoof_uname(struct new_utsname* tmp);
 #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
 void susfs_set_log(bool enabled);
 #endif
+/* proc umounted state */
+static inline bool susfs_is_current_proc_umounted(void)
+{
+#if defined(CONFIG_KSU_KPROBES_HOOK)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
+	return !test_task_syscall_work(current, SYSCALL_TRACEPOINT);
+#else
+	return !test_tsk_thread_flag(current, TIF_SYSCALL_TRACEPOINT);
+#endif
+#else
+	return false;
+#endif
+}
+
+static inline void susfs_set_current_proc_umounted(void)
+{
+#if defined(CONFIG_KSU_KPROBES_HOOK)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
+	clear_task_syscall_work(current, SYSCALL_TRACEPOINT);
+#else
+	clear_tsk_thread_flag(current, TIF_SYSCALL_TRACEPOINT);
+#endif
+#endif
+}
 /* spoof_cmdline_or_bootconfig */
 #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
 int susfs_set_cmdline_or_bootconfig(char* __user user_fake_boot_config);
@@ -182,6 +207,7 @@ int susfs_sus_su(struct st_sus_su* __user user_info);
 #endif
 /* susfs_init */
 void susfs_init(void);
+static inline void susfs_start_sdcard_monitor_fn(void) {}
 
 #endif
 bool susfs_handle_ioctl(unsigned int cmd, unsigned long arg);

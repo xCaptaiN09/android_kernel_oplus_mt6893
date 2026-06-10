@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Configuration
 ARCH=arm64
@@ -17,9 +18,17 @@ OBJCOPY=$TOOLCHAIN/bin/llvm-objcopy
 OBJDUMP=$TOOLCHAIN/bin/llvm-objdump
 STRIP=$TOOLCHAIN/bin/llvm-strip
 
+export ARCH SUBARCH KBUILD_BUILD_USER KBUILD_BUILD_HOST
+
+if [ ! -x "$CLANG" ]; then
+    echo "Missing clang at: $CLANG"
+    exit 1
+fi
+
 # Step 1: Clean out directory
 echo "Cleaning out directory..."
 rm -rf out
+: > build.log
 
 # Step 2: Configure and build host tools
 echo "Step 1: Configuring and building scripts..."
@@ -30,7 +39,7 @@ make ARCH=$ARCH O=out \
     HOSTCXX=/usr/bin/g++ \
     CROSS_COMPILE=aarch64-linux-gnu- \
     CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-    $DEFCONFIG
+    $DEFCONFIG 2>&1 | tee -a build.log
 
 make ARCH=$ARCH O=out \
     CC="$CLANG" \
@@ -38,7 +47,7 @@ make ARCH=$ARCH O=out \
     HOSTCXX=/usr/bin/g++ \
     CROSS_COMPILE=aarch64-linux-gnu- \
     CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-    scripts -j$(nproc --all)
+    scripts -j$(nproc --all) 2>&1 | tee -a build.log
 
 # Step 3: Build the kernel using Toolchain
 echo "Step 2: Compiling kernel with Proton Clang..."
@@ -54,7 +63,7 @@ make ARCH=$ARCH SUBARCH=$SUBARCH O=out \
     CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
     HOSTCC=/usr/bin/gcc \
     HOSTCXX=/usr/bin/g++ \
-    -j$(nproc --all) 2>&1 | tee build.log
+    -j$(nproc --all) 2>&1 | tee -a build.log
 
 if [ -f "out/arch/arm64/boot/Image.gz-dtb" ]; then
     echo "--- Build Success ---"

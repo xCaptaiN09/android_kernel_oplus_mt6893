@@ -17,7 +17,8 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y bc bison build-essential curl flex gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi git gnupg gperf libncurses5-dev libssl-dev python2 python3 zip zlib1g-dev
+        sudo apt-get install -y bc bison build-essential curl flex gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi git gnupg gperf libncurses5-dev libssl-dev python3 zip zlib1g-dev
+        sudo apt-get install -y python2 || true
 
     - name: Set up Proton Clang
       run: |
@@ -32,11 +33,15 @@ jobs:
 
     - name: Show errors on failure
       if: failure()
-      run: grep -E "error:|fatal error:" build.log | head -30
+      run: |
+        test -f build.log
+        grep -E "error:|fatal error:" build.log | head -30 || true
 
     - name: Print build log on failure
       if: failure()
-      run: tail -100 build.log
+      run: |
+        test -f build.log
+        tail -100 build.log
 
     - name: Upload Image.gz-dtb
       uses: actions/upload-artifact@v4
@@ -51,10 +56,10 @@ jobs:
         cp anykernel_template.sh AnyKernel3/anykernel.sh
         cd AnyKernel3
         rm -rf .git
-        zip -r9 ../Realme_UI_KSU_RMX3031.zip *
+        zip -r9 ../KSU_Next_OP6893_COS16.zip *
 
     - name: Upload Flashable Zip
       uses: actions/upload-artifact@v4
       with:
-        name: Realme_UI_KSU_RMX3031
-        path: Realme_UI_KSU_RMX3031.zip
+        name: KSU_Next_OP6893_COS16
+        path: KSU_Next_OP6893_COS16.zip
