@@ -960,6 +960,80 @@ void susfs_init(void) {
 
 bool susfs_handle_ioctl(unsigned int cmd, unsigned long arg) {
 	switch (cmd) {
+	case CMD_SUSFS_SHOW_VERSION:
+		return copy_to_user((void __user *)arg, SUSFS_VERSION,
+				    strlen(SUSFS_VERSION) + 1) == 0;
+	case CMD_SUSFS_SHOW_ENABLED_FEATURES: {
+		u64 enabled_features = 0;
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+		enabled_features |= (1ULL << 0);
+#endif
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+		enabled_features |= (1ULL << 1);
+#endif
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+		enabled_features |= (1ULL << 2);
+#endif
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+		enabled_features |= (1ULL << 3);
+#endif
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+		enabled_features |= (1ULL << 4);
+#endif
+#ifdef CONFIG_KSU_SUSFS_SUS_OVERLAYFS
+		enabled_features |= (1ULL << 5);
+#endif
+#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+		enabled_features |= (1ULL << 6);
+#endif
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
+		enabled_features |= (1ULL << 7);
+#endif
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+		enabled_features |= (1ULL << 8);
+#endif
+#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+		enabled_features |= (1ULL << 9);
+#endif
+#ifdef CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+		enabled_features |= (1ULL << 10);
+#endif
+#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+		enabled_features |= (1ULL << 11);
+#endif
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+		enabled_features |= (1ULL << 12);
+#endif
+#ifdef CONFIG_KSU_SUSFS_SUS_SU
+		enabled_features |= (1ULL << 13);
+#endif
+#ifdef CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT
+		enabled_features |= (1ULL << 14);
+#endif
+		return copy_to_user((void __user *)arg, &enabled_features,
+				    sizeof(enabled_features)) == 0;
+	}
+	case CMD_SUSFS_SHOW_VARIANT:
+		return copy_to_user((void __user *)arg, SUSFS_VARIANT,
+				    strlen(SUSFS_VARIANT) + 1) == 0;
+	case CMD_SUSFS_SHOW_SUS_SU_WORKING_MODE:
+#ifdef CONFIG_KSU_SUSFS_SUS_SU
+	{
+		int mode = susfs_get_sus_su_working_mode();
+		return copy_to_user((void __user *)arg, &mode, sizeof(mode)) == 0;
+	}
+#else
+		return false;
+#endif
+	case CMD_SUSFS_IS_SUS_SU_READY:
+#ifdef CONFIG_KSU_SUSFS_SUS_SU
+	{
+		bool ready = true;
+		return copy_to_user((void __user *)arg, &ready, sizeof(ready)) == 0;
+	}
+#else
+		return false;
+#endif
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	case CMD_SUSFS_ADD_SUS_PATH:
 		return susfs_add_sus_path((struct st_susfs_sus_path __user *)arg) == 0;
