@@ -230,9 +230,23 @@ int susfs_add_sus_mount(struct st_susfs_sus_mount* __user user_info) {
 }
 
 #ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+static bool susfs_is_android_app_storage_path(const char *pathname)
+{
+	static const char android_data[] = "/data/media/0/Android/data/";
+	static const char android_obb[] = "/data/media/0/Android/obb/";
+
+	return !strncmp(pathname, android_data, sizeof(android_data) - 1) ||
+	       !strncmp(pathname, android_obb, sizeof(android_obb) - 1);
+}
+
 int susfs_auto_add_sus_bind_mount(const char *pathname, struct path *path_target) {
 	struct mount *mnt;
 	struct inode *inode;
+
+	if (pathname && susfs_is_android_app_storage_path(pathname)) {
+		SUSFS_LOGI("skip Android app storage bind mount path '%s'\n", pathname);
+		return 0;
+	}
 
 	mnt = real_mount(path_target->mnt);
 	if (mnt->mnt_group_id > 0 && // 0 means no peer group
@@ -948,6 +962,14 @@ bool susfs_handle_ioctl(unsigned int cmd, unsigned long arg) {
 	case CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG:
 		return susfs_set_cmdline_or_bootconfig((char __user *)arg) == 0;
 #endif
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+	case CMD_SUSFS_ADD_OPEN_REDIRECT:
+		return susfs_add_open_redirect((struct st_susfs_open_redirect __user *)arg) == 0;
+#endif
+#ifdef CONFIG_KSU_SUSFS_SUS_SU
+	case CMD_SUSFS_SUS_SU:
+		return susfs_sus_su((struct st_sus_su __user *)arg) == 0;
+#endif
 	default:
 		return false;
 	}
@@ -965,6 +987,4 @@ bool susfs_is_allow_su(void) {
     return false;
 #endif
 }
-
-
 
