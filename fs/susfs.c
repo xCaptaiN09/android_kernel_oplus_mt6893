@@ -135,6 +135,36 @@ int susfs_sus_ino_for_filldir64(unsigned long ino) {
 	}
 	return 0;
 }
+
+void susfs_run_sus_path_loop(void)
+{
+	struct susfs_path_update {
+		struct list_head list;
+		char pathname[SUSFS_MAX_LEN_PATHNAME];
+	};
+	struct susfs_path_update *update, *tmp;
+	struct st_susfs_sus_path_hlist *entry;
+	struct hlist_node *tmp_node;
+	LIST_HEAD(updates);
+	int bkt;
+
+	spin_lock(&susfs_spin_lock);
+	hash_for_each_safe(SUS_PATH_HLIST, bkt, tmp_node, entry, node) {
+		update = kmalloc(sizeof(*update), GFP_ATOMIC);
+		if (!update)
+			continue;
+		strncpy(update->pathname, entry->target_pathname, SUSFS_MAX_LEN_PATHNAME - 1);
+		update->pathname[SUSFS_MAX_LEN_PATHNAME - 1] = '\0';
+		list_add_tail(&update->list, &updates);
+	}
+	spin_unlock(&susfs_spin_lock);
+
+	list_for_each_entry_safe(update, tmp, &updates, list) {
+		susfs_update_sus_path_inode(update->pathname);
+		list_del(&update->list);
+		kfree(update);
+	}
+}
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 
 /* sus_mount */
@@ -987,4 +1017,3 @@ bool susfs_is_allow_su(void) {
     return false;
 #endif
 }
-
