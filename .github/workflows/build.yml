@@ -56,10 +56,10 @@ jobs:
         cp anykernel_template.sh AnyKernel3/anykernel.sh
         cd AnyKernel3
         rm -rf .git
-        zip -r9 ../KSU_Next_OP6893_AOSP.zip *
+        zip -r9 ../KSU_Next_OP6893.zip *
 
     - name: Upload Flashable Zip
       uses: actions/upload-artifact@v4
       with:
-        name: KSU_Next_OP6893_AOSP
-        path: KSU_Next_OP6893_AOSP.zip
+        name: KSU_Next_OP6893
+        path: KSU_Next_OP6893.zip

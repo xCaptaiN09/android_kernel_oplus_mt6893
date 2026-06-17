@@ -45,32 +45,35 @@ PATCH_VBMETA_FLAG=auto;
 . tools/ak3-core.sh;
 
 ui_print " ";
-ui_print "========================================";
-ui_print "        KSU Next OP6893 Kernel";
-ui_print "========================================";
-ui_print " ";
-ui_print "  Maintainer : xCaptaiN09";
-ui_print "  Base       : OPlus MT6893 4.19";
-ui_print "  Root       : KernelSU Next";
-ui_print "  SuSFS      : v1.5.5";
-ui_print "  KPM        : Enabled";
-ui_print " ";
-ui_print "  Supported devices:";
-ui_print "    - Realme X7 Max 5G";
-ui_print "    - RMX3031 / cupida";
-ui_print "    - OnePlus Nord 2";
-ui_print "    - DN2101 / DN2103 / denniz";
-ui_print " ";
-ui_print "  Flash target: boot";
-ui_print "========================================";
+ui_print "╔════════════════════════════════════════╗";
+ui_print "║                                        ║";
+ui_print "║            KSU NEXT KERNEL             ║";
+ui_print "║          MT6893 | Linux 4.19           ║";
+ui_print "║                                        ║";
+ui_print "╠════════════════════════════════════════╣";
+ui_print "║                                        ║";
+ui_print "║  Maintainer  xCaptaiN09                ║";
+ui_print "║  Base        OPlus MT6893 4.19         ║";
+ui_print "║  Root        KernelSU Next             ║";
+ui_print "║  SuSFS       v2.1.0                    ║";
+ui_print "║  KPM         External/kpatch           ║";
+ui_print "║                                        ║";
+ui_print "╠════════════════════════════════════════╣";
+ui_print "║                                        ║";
+ui_print "║  Realme X7 Max 5G    RMX3031/cupida    ║";
+ui_print "║  OnePlus Nord 2      DN2101/denniz     ║";
+ui_print "║                                        ║";
+ui_print "╚════════════════════════════════════════╝";
 ui_print " ";
 
 # boot install
-ui_print "  Extracting current boot image...";
+ui_print "  [1/2] Extracting boot image...";
 split_boot;
 
-ui_print "  Flashing Image.gz-dtb...";
+ui_print "  [2/2] Flashing Image.gz-dtb...";
 flash_boot;
+
 ui_print " ";
-ui_print "  Install complete.";
+ui_print "  Installation complete.";
+ui_print " ";
 ## end boot install
