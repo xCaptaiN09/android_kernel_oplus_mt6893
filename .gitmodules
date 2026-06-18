@@ -1,4 +1,4 @@
 [submodule "KernelSU-Next"]
 	path = KernelSU-Next
 	url = https://github.com/xCaptaiN09/KernelSU-Next.git
-	branch = xcaptain-susfs-v2.1.0-kpm
+	branch = xcaptain-susfs-v2.1.0-kpm-manual-hook
