@@ -8,6 +8,7 @@ DEFCONFIG=cupida_defconfig
 TOOLCHAIN=${TOOLCHAIN:-/home/captain/Projects/toolchain/proton-clang}
 KBUILD_BUILD_USER=xCaptaiN09
 KBUILD_BUILD_HOST=NetHunter
+KBUILD_BUILD_TIMESTAMP="Sat Jun 6 12:00:00 UTC 2026"
 
 # Cross tools variables using absolute paths
 CLANG=$TOOLCHAIN/bin/clang
@@ -18,7 +19,7 @@ OBJCOPY=$TOOLCHAIN/bin/llvm-objcopy
 OBJDUMP=$TOOLCHAIN/bin/llvm-objdump
 STRIP=$TOOLCHAIN/bin/llvm-strip
 
-export ARCH SUBARCH KBUILD_BUILD_USER KBUILD_BUILD_HOST
+export ARCH SUBARCH KBUILD_BUILD_USER KBUILD_BUILD_HOST KBUILD_BUILD_TIMESTAMP
 
 if [ ! -x "$CLANG" ]; then
     echo "Missing clang at: $CLANG"
