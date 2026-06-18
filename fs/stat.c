@@ -24,6 +24,12 @@
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
 
+#ifdef CONFIG_KSU
+extern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);
+#endif
+#ifdef CONFIG_KSU_SUSFS_SUS_SU
+extern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);
+#endif
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 extern void susfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat);
 #endif
@@ -411,6 +417,11 @@ SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
 
 	if (!error)
 		error = cp_new_stat(&stat, statbuf);
+	if (!error) {
+#ifdef CONFIG_KSU
+		ksu_handle_newfstat_ret(&fd, &statbuf);
+#endif
+	}
 
 	return error;
 }
@@ -537,6 +548,11 @@ SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)
 
 	if (!error)
 		error = cp_new_stat64(&stat, statbuf);
+	if (!error) {
+#ifdef CONFIG_KSU
+		ksu_handle_fstat64_ret(&fd, &statbuf);
+#endif
+	}
 
 	return error;
 }
