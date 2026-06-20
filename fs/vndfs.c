@@ -21,7 +21,7 @@
 #include <linux/fsnotify_backend.h>
 #include <linux/jump_label.h>
 #include <linux/version.h> // We need check kernel version.
-#include <linux/susfs.h>
+#include <linux/vndfs.h>
 #include "fuse/fuse_i.h"
 #include "mount.h"
 

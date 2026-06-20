@@ -32,7 +32,7 @@
 #include <linux/rculist_bl.h>
 #include <linux/list_lru.h>
 #ifdef CONFIG_KSU_VNDFS_SUS_PATH
-#include <linux/susfs.h>
+#include <linux/vndfs.h>
 #endif
 #include "internal.h"
 #include "mount.h"

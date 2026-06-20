@@ -38,7 +38,7 @@
 #include <linux/sched/numa_balancing.h>
 #include <linux/sched/task.h>
 #ifdef CONFIG_KSU_SUSFS
-#include <linux/susfs.h>
+#include <linux/vndfs.h>
 #endif
 #include <linux/pagemap.h>
 #include <linux/perf_event.h>
