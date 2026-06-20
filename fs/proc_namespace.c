@@ -12,7 +12,7 @@
 #include <linux/security.h>
 #include <linux/fs_struct.h>
 #include <linux/sched/task.h>
-#ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 #include <linux/vndfs_def.h>
 #endif
 
@@ -105,7 +105,7 @@ static int show_vfsmnt(struct seq_file *m, struct vfsmount *mnt)
 	struct super_block *sb = mnt_path.dentry->d_sb;
 	int err;
 
-#ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	if (unlikely(r->mnt_id >= DEFAULT_SUS_MNT_ID))
 		return 0;
 #endif
@@ -146,7 +146,7 @@ static int show_mountinfo(struct seq_file *m, struct vfsmount *mnt)
 	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
 	int err;
 
-#ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	if (unlikely(r->mnt_id >= DEFAULT_SUS_MNT_ID))
 		return 0;
 #endif
@@ -215,7 +215,7 @@ static int show_vfsstat(struct seq_file *m, struct vfsmount *mnt)
 	struct super_block *sb = mnt_path.dentry->d_sb;
 	int err;
 
-#ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	if (unlikely(r->mnt_id >= DEFAULT_SUS_MNT_ID))
 		return 0;
 #endif

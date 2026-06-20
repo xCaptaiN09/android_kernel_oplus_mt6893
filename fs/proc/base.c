@@ -1680,7 +1680,7 @@ static int proc_pid_readlink(struct dentry * dentry, char __user * buffer, int b
 	struct inode *inode = d_inode(dentry);
 	struct path path;
 
-#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	if (unlikely(inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC))
 		return -ENOENT;
 #endif

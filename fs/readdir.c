@@ -25,7 +25,7 @@
 #ifdef CONFIG_KSU_SUSFS
 #include <linux/vndfs.h>
 #endif
-#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
 #include <linux/vndfs_def.h>
 #endif
 
@@ -138,7 +138,7 @@ static int fillonedir(struct dir_context *ctx, const char *name, int namlen,
 
 	if (buf->result)
 		return -EINVAL;
-#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	if (likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC) && vndfs_sus_ino_for_filldir64(ino)) {
 		return 0;
 	}
@@ -221,7 +221,7 @@ static int filldir(struct dir_context *ctx, const char *name, int namlen,
 	int reclen = ALIGN(offsetof(struct linux_dirent, d_name) + namlen + 2,
 		sizeof(long));
 
-#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	if (likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC) && vndfs_sus_ino_for_filldir64(ino)) {
 		return 0;
 	}
@@ -232,7 +232,7 @@ static int filldir(struct dir_context *ctx, const char *name, int namlen,
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
 		return -EINVAL;
-#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	if (likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC) && vndfs_sus_ino_for_filldir64(ino)) {
 		return 0;
 	}
@@ -320,7 +320,7 @@ static int filldir64(struct dir_context *ctx, const char *name, int namlen,
 	int reclen = ALIGN(offsetof(struct linux_dirent64, d_name) + namlen + 1,
 		sizeof(u64));
 
-#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	if (likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC) && vndfs_sus_ino_for_filldir64(ino)) {
 		return 0;
 	}
@@ -331,7 +331,7 @@ static int filldir64(struct dir_context *ctx, const char *name, int namlen,
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
 		return -EINVAL;
-#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	if (likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC) && vndfs_sus_ino_for_filldir64(ino)) {
 		return 0;
 	}
@@ -400,7 +400,7 @@ int ksys_getdents64(unsigned int fd, struct linux_dirent64 __user *dirent,
 	return error;
 }
 
-#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
 extern int vndfs_sus_ino_for_filldir64(unsigned long ino);
 #endif
 
@@ -435,7 +435,7 @@ static int compat_fillonedir(struct dir_context *ctx, const char *name,
 
 	if (buf->result)
 		return -EINVAL;
-#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	if (likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC) && vndfs_sus_ino_for_filldir64(ino)) {
 		return 0;
 	}
@@ -515,7 +515,7 @@ static int compat_filldir(struct dir_context *ctx, const char *name, int namlen,
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
 		return -EINVAL;
-#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	if (likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC) && vndfs_sus_ino_for_filldir64(ino)) {
 		return 0;
 	}

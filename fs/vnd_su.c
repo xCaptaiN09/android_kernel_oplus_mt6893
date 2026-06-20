@@ -8,7 +8,7 @@
 #include <linux/jump_label.h>
 #include <linux/sus_su.h>
 
-#ifdef CONFIG_KSU_VNDFS_ENABLE_LOG
+#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
 DECLARE_STATIC_KEY_TRUE(vndfs_is_log_enabled);
 #define VNDFS_LOGI(fmt, ...) if (static_branch_likely(&vndfs_is_log_enabled)) pr_info("vndfs_sus_su:[%u][%u][%s] " fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
 #define VNDFS_LOGE(fmt, ...) if (static_branch_likely(&vndfs_is_log_enabled)) pr_err("vndfs_sus_su:[%u][%u][%s]" fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
