@@ -1598,7 +1598,7 @@ void vndfs_start_sdcard_monitor_fn(void) {
 	}
 }
 
-// - defer extra susfs works to workqueue after do_umount in ksu_handle_setresuid()
+// - defer extra susfs works to workqueue after do_umount in vnd_handle_setresuid()
 //   so that we do not block there and reduce the risk of time side channel as much as possible.
 struct work_struct vndfs_extra_works;
 static void vndfs_run_extra_works(struct work_struct *work) {
