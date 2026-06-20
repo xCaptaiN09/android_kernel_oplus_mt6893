@@ -1259,7 +1259,7 @@ static int override_release(char __user *release, size_t len)
 	return ret;
 }
 
-#ifdef CONFIG_KSU_VNDFS_SPOOF_UNAME
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 extern void vndfs_spoof_uname(struct new_utsname* tmp);
 #endif
 SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
@@ -1268,7 +1268,7 @@ SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 
 	down_read(&uts_sem);
 	memcpy(&tmp, utsname(), sizeof(tmp));
-#ifdef CONFIG_KSU_VNDFS_SPOOF_UNAME
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 	vndfs_spoof_uname(&tmp);
 #endif
 	up_read(&uts_sem);

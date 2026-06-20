@@ -29,13 +29,13 @@ extern bool vndfs_is_current_ksu_domain(void);
 extern void setup_selinux(const char *domain, struct cred *cred);
 extern struct cred *ksu_cred;
 
-#ifdef CONFIG_KSU_VNDFS_SUS_SU
+#ifdef CONFIG_KSU_SUSFS_SUS_SU
 bool vndfs_is_sus_su_hooks_enabled __read_mostly;
 extern void ksu_vndfs_enable_sus_su(void);
 extern void ksu_vndfs_disable_sus_su(void);
 #endif
 
-#ifdef CONFIG_KSU_VNDFS_ENABLE_LOG
+#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
 DEFINE_STATIC_KEY_TRUE(vndfs_is_log_enabled);
 #define VNDFS_LOGI(fmt, ...) if (static_branch_likely(&vndfs_is_log_enabled)) pr_info("susfs:[%u][%d][%s] " fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
 #define VNDFS_LOGE(fmt, ...) if (static_branch_likely(&vndfs_is_log_enabled)) pr_err("susfs:[%u][%d][%s]" fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
@@ -45,7 +45,7 @@ DEFINE_STATIC_KEY_TRUE(vndfs_is_log_enabled);
 #endif
 
 /* sus_path */
-#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
 DEFINE_STATIC_SRCU(vndfs_srcu_sus_path_loop);
 static DEFINE_MUTEX(vndfs_mutex_lock_sus_path);
 static LIST_HEAD(LH_SUS_PATH_LOOP);
@@ -281,10 +281,10 @@ int vndfs_sus_ino_for_filldir64(unsigned long ino)
 	srcu_read_unlock(&vndfs_srcu_sus_path_loop, srcu_idx);
 	return ret;
 }
-#endif // #ifdef CONFIG_KSU_VNDFS_SUS_PATH
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 
 /* sus_mount */
-#ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 // - Default to false now so zygisk can pick up the sus mounts without the need to turn it off manually in post-fs-data stage
 //   otherwise user needs to turn it on in post-fs-data stage and turn it off in boot-completed stage
 bool vndfs_hide_sus_mnts_for_non_su_procs = false;
@@ -306,10 +306,10 @@ out_copy_to_user:
 	}
 	VNDFS_LOGI("CMD_VNDFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS -> ret: %d\n", info.err);
 }
-#endif // #ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 
 /* sus_kstat */
-#ifdef CONFIG_KSU_VNDFS_SUS_KSTAT
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 static DEFINE_MUTEX(vndfs_mutex_lock_sus_kstat);
 static DEFINE_HASHTABLE(SUS_KSTAT_HLIST, 10);
 
@@ -702,10 +702,10 @@ void vndfs_sus_ino_for_show_map_vma(unsigned long ino, dev_t *out_dev, unsigned 
 	}
 	rcu_read_unlock();
 }
-#endif // #ifdef CONFIG_KSU_VNDFS_SUS_KSTAT
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 
 /* spoof_uname */
-#ifdef CONFIG_KSU_VNDFS_SPOOF_UNAME
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 static struct st_vndfs_uname my_uname = {0};
 DEFINE_STATIC_KEY_FALSE(vndfs_is_uname_spoof_buffer_set);
 static DEFINE_SEQLOCK(vndfs_uname_seqlock);
@@ -762,10 +762,10 @@ void vndfs_spoof_uname(struct new_utsname* tmp) {
 		strncpy(tmp->version, my_uname.version, __NEW_UTS_LEN);
 	} while (read_seqretry(&vndfs_uname_seqlock, seq));
 }
-#endif // #ifdef CONFIG_KSU_VNDFS_SPOOF_UNAME
+#endif // #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 
 /* enable_log */
-#ifdef CONFIG_KSU_VNDFS_ENABLE_LOG
+#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
 void vndfs_enable_log(void __user **user_info) {
 	struct st_vndfs_log info = {0};
 
@@ -789,10 +789,10 @@ out_copy_to_user:
 	}
 	VNDFS_LOGI("CMD_VNDFS_ENABLE_LOG -> ret: %d\n", info.err);
 }
-#endif // #ifdef CONFIG_KSU_VNDFS_ENABLE_LOG
+#endif // #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
 
 /* spoof_cmdline_or_bootconfig */
-#ifdef CONFIG_KSU_VNDFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
 static char *fake_cmdline_or_bootconfig = NULL;
 DEFINE_STATIC_KEY_FALSE(vndfs_is_fake_cmdline_or_bootconfig_buffer_set);
 static DEFINE_SEQLOCK(vndfs_fake_cmdline_or_bootconfig_seqlock);
@@ -866,7 +866,7 @@ int vndfs_spoof_cmdline_or_bootconfig(struct seq_file *m) {
 #endif
 
 /* open_redirect */
-#ifdef CONFIG_KSU_VNDFS_OPEN_REDIRECT
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 static DEFINE_MUTEX(vndfs_mutex_lock_open_redirect);
 static DEFINE_HASHTABLE(OPEN_REDIRECT_HLIST, 10);
 DEFINE_STATIC_SRCU(vndfs_srcu_open_redirect);
@@ -1213,10 +1213,10 @@ int vndfs_open_redirect_spoof_show_map_vma(struct inode *inode, unsigned long *o
 	srcu_read_unlock(&vndfs_srcu_open_redirect, srcu_idx);
 	return -EINVAL;
 }
-#endif // #ifdef CONFIG_KSU_VNDFS_OPEN_REDIRECT
+#endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 
 /* sus_map */
-#ifdef CONFIG_KSU_VNDFS_SUS_MAP
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
 void vndfs_add_sus_map(void __user **user_info) {
 	struct st_vndfs_sus_map info = {0};
 	struct path path;
@@ -1250,7 +1250,7 @@ out_copy_to_user:
 	}
 	VNDFS_LOGI("CMD_VNDFS_ADD_SUS_MAP -> ret: %d\n", info.err);
 }
-#endif // #ifdef CONFIG_KSU_VNDFS_SUS_MAP
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 
 /* susfs avc log spoofing */
 DEFINE_STATIC_KEY_FALSE(vndfs_is_avc_log_spoofing_enabled);
@@ -1313,48 +1313,48 @@ void vndfs_get_enabled_features(void __user **user_info) {
 
 	buf_ptr = info->enabled_features;
 
-#ifdef CONFIG_KSU_VNDFS_SUS_PATH
-	info->err = copy_config_to_buf("CONFIG_KSU_VNDFS_SUS_PATH\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_SUS_PATH\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
 	if (info->err) goto out_copy_to_user;
 	buf_ptr = info->enabled_features + copied_size;
 #endif
-#ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
-	info->err = copy_config_to_buf("CONFIG_KSU_VNDFS_SUS_MOUNT\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_SUS_MOUNT\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
 	if (info->err) goto out_copy_to_user;
 	buf_ptr = info->enabled_features + copied_size;
-#endif // #ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
-#ifdef CONFIG_KSU_VNDFS_SUS_KSTAT
-	info->err = copy_config_to_buf("CONFIG_KSU_VNDFS_SUS_KSTAT\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
-	if (info->err) goto out_copy_to_user;
-	buf_ptr = info->enabled_features + copied_size;
-#endif
-#ifdef CONFIG_KSU_VNDFS_SPOOF_UNAME
-	info->err = copy_config_to_buf("CONFIG_KSU_VNDFS_SPOOF_UNAME\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_SUS_KSTAT\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
 	if (info->err) goto out_copy_to_user;
 	buf_ptr = info->enabled_features + copied_size;
 #endif
-#ifdef CONFIG_KSU_VNDFS_ENABLE_LOG
-	info->err = copy_config_to_buf("CONFIG_KSU_VNDFS_ENABLE_LOG\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_SPOOF_UNAME\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
 	if (info->err) goto out_copy_to_user;
 	buf_ptr = info->enabled_features + copied_size;
 #endif
-#ifdef CONFIG_KSU_VNDFS_HIDE_KSU_VNDFS_SYMBOLS
-	info->err = copy_config_to_buf("CONFIG_KSU_VNDFS_HIDE_KSU_VNDFS_SYMBOLS\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
+#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_ENABLE_LOG\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
 	if (info->err) goto out_copy_to_user;
 	buf_ptr = info->enabled_features + copied_size;
 #endif
-#ifdef CONFIG_KSU_VNDFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-	info->err = copy_config_to_buf("CONFIG_KSU_VNDFS_SPOOF_CMDLINE_OR_BOOTCONFIG\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
+#ifdef CONFIG_KSU_SUSFS_HIDE_KSU_VNDFS_SYMBOLS
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_HIDE_KSU_VNDFS_SYMBOLS\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
 	if (info->err) goto out_copy_to_user;
 	buf_ptr = info->enabled_features + copied_size;
 #endif
-#ifdef CONFIG_KSU_VNDFS_OPEN_REDIRECT
-	info->err = copy_config_to_buf("CONFIG_KSU_VNDFS_OPEN_REDIRECT\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
+#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
 	if (info->err) goto out_copy_to_user;
 	buf_ptr = info->enabled_features + copied_size;
 #endif
-#ifdef CONFIG_KSU_VNDFS_SUS_MAP
-	info->err = copy_config_to_buf("CONFIG_KSU_VNDFS_SUS_MAP\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_OPEN_REDIRECT\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
+	if (info->err) goto out_copy_to_user;
+	buf_ptr = info->enabled_features + copied_size;
+#endif
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_SUS_MAP\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
 	if (info->err) goto out_copy_to_user;
 	buf_ptr = info->enabled_features + copied_size;
 #endif
@@ -1604,9 +1604,9 @@ struct work_struct vndfs_extra_works;
 static void vndfs_run_extra_works(struct work_struct *work) {
 	if (!ksu_cred)
 		return;
-	#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+	#ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	vndfs_run_sus_path_loop();
-	#endif // #ifdef CONFIG_KSU_VNDFS_SUS_PATH
+	#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 }
 
 /* vndfs_init */
@@ -1634,7 +1634,7 @@ bool vndfs_handle_ioctl(unsigned int cmd, unsigned long arg)
 	case CMD_VNDFS_SHOW_VARIANT:
 		vndfs_show_variant(user_info);
 		return true;
-#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	case CMD_VNDFS_ADD_SUS_PATH:
 		vndfs_add_sus_path(user_info);
 		return true;
@@ -1642,12 +1642,12 @@ bool vndfs_handle_ioctl(unsigned int cmd, unsigned long arg)
 		vndfs_add_sus_path_loop(user_info);
 		return true;
 #endif
-#ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	case CMD_VNDFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS:
 		vndfs_set_hide_sus_mnts_for_non_su_procs(user_info);
 		return true;
 #endif
-#ifdef CONFIG_KSU_VNDFS_SUS_KSTAT
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 	case CMD_VNDFS_ADD_SUS_KSTAT:
 	case CMD_VNDFS_ADD_SUS_KSTAT_STATICALLY:
 		vndfs_add_sus_kstat(user_info);
@@ -1656,22 +1656,22 @@ bool vndfs_handle_ioctl(unsigned int cmd, unsigned long arg)
 		vndfs_update_sus_kstat(user_info);
 		return true;
 #endif
-#ifdef CONFIG_KSU_VNDFS_SPOOF_UNAME
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 	case CMD_VNDFS_SET_UNAME:
 		vndfs_set_uname(user_info);
 		return true;
 #endif
-#ifdef CONFIG_KSU_VNDFS_ENABLE_LOG
+#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
 	case CMD_VNDFS_ENABLE_LOG:
 		vndfs_enable_log(user_info);
 		return true;
 #endif
-#ifdef CONFIG_KSU_VNDFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
 	case CMD_VNDFS_SET_CMDLINE_OR_BOOTCONFIG:
 		vndfs_set_cmdline_or_bootconfig(user_info);
 		return true;
 #endif
-#ifdef CONFIG_KSU_VNDFS_OPEN_REDIRECT
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 	case CMD_VNDFS_ADD_OPEN_REDIRECT:
 		vndfs_add_open_redirect(user_info);
 		return true;
@@ -1689,7 +1689,7 @@ bool vndfs_handle_ioctl(unsigned int cmd, unsigned long arg)
 	case CMD_VNDFS_SUS_SU:
 		vndfs_sus_su(user_info);
 		return true;
-#ifdef CONFIG_KSU_VNDFS_SUS_MAP
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
 	case CMD_VNDFS_ADD_SUS_MAP:
 		vndfs_add_sus_map(user_info);
 		return true;
@@ -1709,7 +1709,7 @@ bool vndfs_is_allow_su(void)
 
 int vndfs_get_sus_su_working_mode(void)
 {
-#ifdef CONFIG_KSU_VNDFS_SUS_SU
+#ifdef CONFIG_KSU_SUSFS_SUS_SU
 	return vndfs_is_sus_su_hooks_enabled ? 2 : 0;
 #else
 	return 0;
@@ -1725,7 +1725,7 @@ void vndfs_sus_su(void __user **user_info)
 		goto out_copy_to_user;
 	}
 
-#ifdef CONFIG_KSU_VNDFS_SUS_SU
+#ifdef CONFIG_KSU_SUSFS_SUS_SU
 	switch (info.mode) {
 	case SUS_SU_WITH_HOOKS:
 		ksu_vndfs_enable_sus_su();
