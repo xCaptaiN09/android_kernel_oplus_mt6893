@@ -40,8 +40,8 @@
 #include <linux/init_task.h>
 #include <linux/uaccess.h>
 #include <linux/build_bug.h>
-#if defined(CONFIG_KSU_SUSFS_SUS_PATH) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
-#include <linux/susfs_def.h>
+#if defined(CONFIG_KSU_VNDFS_SUS_PATH) || defined(CONFIG_KSU_VNDFS_OPEN_REDIRECT)
+#include <linux/vndfs_def.h>
 #endif
 
 #include "internal.h"
@@ -1008,8 +1008,8 @@ static inline int may_follow_link(struct nameidata *nd)
 	const struct inode *parent;
 	kuid_t puid;
 
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (nd->inode && unlikely(nd->inode->i_state & INODE_STATE_SUS_PATH) && likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+	if (nd->inode && unlikely(nd->inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
 		return -ENOENT;
 	}
 #endif
@@ -1091,8 +1091,8 @@ static int may_linkat(struct path *link)
 {
 	struct inode *inode = link->dentry->d_inode;
 
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (inode && unlikely(inode->i_state & INODE_STATE_SUS_PATH) && likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+	if (inode && unlikely(inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
 		return -ENOENT;
 	}
 #endif
@@ -1138,8 +1138,8 @@ static int may_linkat(struct path *link)
 static int may_create_in_sticky(umode_t dir_mode, kuid_t dir_uid,
 				struct inode * const inode)
 {
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (unlikely(inode->i_state & INODE_STATE_SUS_PATH) && likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+	if (unlikely(inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
 		return -ENOENT;
 	}
 #endif
@@ -1664,8 +1664,8 @@ static struct dentry *__lookup_hash(const struct qstr *name,
 		dput(dentry);
 		dentry = old;
 	}
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (!IS_ERR(dentry) && dentry->d_inode && unlikely(dentry->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+	if (!IS_ERR(dentry) && dentry->d_inode && unlikely(dentry->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
 		dput(dentry);
 		return ERR_PTR(-ENOENT);
 	}
@@ -1797,8 +1797,8 @@ again:
 			dentry = old;
 		}
 	}
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (!IS_ERR(dentry) && dentry->d_inode && unlikely(dentry->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+	if (!IS_ERR(dentry) && dentry->d_inode && unlikely(dentry->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
 		dput(dentry);
 		return ERR_PTR(-ENOENT);
 	}
@@ -2293,9 +2293,9 @@ OK:
 			}
 			return -ENOTDIR;
 		}
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
 		// we deal with sus sub path here
-		if (nd->inode && unlikely(nd->inode->i_state & INODE_STATE_SUS_PATH) && likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
+		if (nd->inode && unlikely(nd->inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
 			return 0;
 		}
 #endif
@@ -2488,8 +2488,8 @@ int filename_lookup(int dfd, struct filename *name, unsigned flags,
 	if (likely(!retval))
 		audit_inode(name, path->dentry, flags & LOOKUP_PARENT);
 	restore_nameidata();
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (!retval && path->dentry->d_inode && unlikely(path->dentry->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+	if (!retval && path->dentry->d_inode && unlikely(path->dentry->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
 		putname(name);
 		return -ENOENT;
 	}
@@ -2976,8 +2976,8 @@ static int may_delete(struct vfsmount *mnt, struct inode *dir, struct dentry *vi
 	if (IS_APPEND(dir))
 		return -EPERM;
 
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (unlikely(inode->i_state & INODE_STATE_SUS_PATH) && likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+	if (unlikely(inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
 		return -ENOENT;
 	}
 #endif
@@ -3010,13 +3010,13 @@ static int may_delete(struct vfsmount *mnt, struct inode *dir, struct dentry *vi
  */
 static inline int may_create(struct vfsmount *mnt, struct inode *dir, struct dentry *child)
 {
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
 	int error;
 #endif
 	struct user_namespace *s_user_ns;
 	audit_inode_child(dir, child, AUDIT_TYPE_CHILD_CREATE);
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (child->d_inode && unlikely(child->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+	if (child->d_inode && unlikely(child->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
 		error = inode_permission(dir, MAY_WRITE | MAY_EXEC);
 		if (error) {
 			return error;
@@ -3153,8 +3153,8 @@ static int may_open(const struct path *path, int acc_mode, int flag)
 	if (!inode)
 		return -ENOENT;
 
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (unlikely(inode->i_state & INODE_STATE_SUS_PATH) && likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+	if (unlikely(inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
 		return -ENOENT;
 	}
 #endif
@@ -3230,10 +3230,10 @@ static inline int open_to_namei_flags(int flag)
 static int may_o_create(const struct path *dir, struct dentry *dentry, umode_t mode)
 {
 	struct user_namespace *s_user_ns;
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
 	int error;
 
-	if (dentry->d_inode && unlikely(dentry->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
+	if (dentry->d_inode && unlikely(dentry->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
 		error = inode_permission(dir->dentry->d_inode, MAY_WRITE | MAY_EXEC);
 		if (error) {
 			return error;
@@ -3382,8 +3382,8 @@ static int lookup_open(struct nameidata *nd, struct path *path,
 	}
 	if (dentry->d_inode) {
 		/* Cached positive dentry: will open in f_op->open */
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-		if (unlikely(dentry->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+		if (unlikely(dentry->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
 			dput(dentry);
 			return -ENOENT;
 		}
@@ -3431,8 +3431,8 @@ static int lookup_open(struct nameidata *nd, struct path *path,
 				    mode);
 		if (unlikely(error == -ENOENT) && create_error)
 			error = create_error;
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-		if (!IS_ERR(dentry) && dentry->d_inode && unlikely(dentry->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+		if (!IS_ERR(dentry) && dentry->d_inode && unlikely(dentry->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
 			if (create_error) {
 				dput(dentry);
 				return create_error;
@@ -3456,8 +3456,8 @@ no_open:
 			}
 			dput(dentry);
 			dentry = res;
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-			if (dentry->d_inode && unlikely(dentry->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+			if (dentry->d_inode && unlikely(dentry->d_inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
 				dput(dentry);
 				return -ENOENT;
 			}
@@ -3800,8 +3800,8 @@ static struct file *path_openat(struct nameidata *nd,
 	return ERR_PTR(error);
 }
 
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-extern struct filename* susfs_get_redirected_path(unsigned long ino);
+#ifdef CONFIG_KSU_VNDFS_OPEN_REDIRECT
+extern struct filename* vndfs_get_redirected_path(unsigned long ino);
 #endif
 
 struct file *do_filp_open(int dfd, struct filename *pathname,
@@ -3810,7 +3810,7 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 	struct nameidata nd;
 	int flags = op->lookup_flags;
 	struct file *filp;
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+#ifdef CONFIG_KSU_VNDFS_OPEN_REDIRECT
 	struct filename *fake_pathname;
 #endif
 
@@ -3820,9 +3820,9 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 		filp = path_openat(&nd, op, flags);
 	if (unlikely(filp == ERR_PTR(-ESTALE)))
 		filp = path_openat(&nd, op, flags | LOOKUP_REVAL);
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+#ifdef CONFIG_KSU_VNDFS_OPEN_REDIRECT
 	if (!IS_ERR(filp) && unlikely(filp->f_inode->i_state & INODE_STATE_OPEN_REDIRECT) && current_uid().val < 2000) {
-		fake_pathname = susfs_get_redirected_path(filp->f_inode->i_ino);
+		fake_pathname = vndfs_get_redirected_path(filp->f_inode->i_ino);
 		if (!IS_ERR(fake_pathname)) {
 			restore_nameidata();
 			filp_close(filp, NULL);

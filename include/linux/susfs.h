@@ -1,5 +1,5 @@
-#ifndef KSU_SUSFS_H
-#define KSU_SUSFS_H
+#ifndef KSU_VNDFS_H
+#define KSU_VNDFS_H
 
 #include <linux/version.h>
 #include <linux/types.h>
@@ -7,17 +7,17 @@
 #include <linux/hashtable.h>
 #include <linux/jump_label.h>
 #include <linux/path.h>
-#include <linux/susfs_def.h>
+#include <linux/vndfs_def.h>
 #include <linux/statfs.h>
 
 struct filename;
 struct seq_file;
 
-#define SUSFS_VERSION "v2.1.0"
+#define VNDFS_VERSION "v2.1.0"
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0)
-#define SUSFS_VARIANT "NON-GKI"
+#define VNDFS_VARIANT "NON-GKI"
 #else
-#define SUSFS_VARIANT "GKI"
+#define VNDFS_VARIANT "GKI"
 #endif
 
 /*********/
@@ -41,29 +41,29 @@ enum UID_SCHEME {
 /* STRUCT */
 /**********/
 /* sus_path */
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-struct st_susfs_sus_path {
-	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+struct st_vndfs_sus_path {
+	char                                    target_pathname[VNDFS_MAX_LEN_PATHNAME];
 	int                                     err;
 };
 
-struct st_susfs_sus_path_list {
+struct st_vndfs_sus_path_list {
 	struct list_head                        list;
-	struct st_susfs_sus_path                info;
-	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+	struct st_vndfs_sus_path                info;
+	char                                    target_pathname[VNDFS_MAX_LEN_PATHNAME];
 };
 #endif
 
 /* sus_mount */
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-struct st_susfs_hide_sus_mnts_for_non_su_procs {
+#ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
+struct st_vndfs_hide_sus_mnts_for_non_su_procs {
 	bool                                    enabled;
 	int                                     err;
 };
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#endif // #ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
 
 /* sus_kstat */
-#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+#ifdef CONFIG_KSU_VNDFS_SUS_KSTAT
 #define KSTAT_SPOOF_INO (1 << 0)
 #define KSTAT_SPOOF_DEV (1 << 1)
 #define KSTAT_SPOOF_NLINK (1 << 2)
@@ -77,10 +77,10 @@ struct st_susfs_hide_sus_mnts_for_non_su_procs {
 #define KSTAT_SPOOF_BLOCKS (1 << 10)
 #define KSTAT_SPOOF_BLKSIZE (1 << 11)
 
-struct st_susfs_sus_kstat {
+struct st_vndfs_sus_kstat {
 	int                                     is_statically;
 	unsigned long                           target_ino;
-	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+	char                                    target_pathname[VNDFS_MAX_LEN_PATHNAME];
 	unsigned long                           spoofed_ino;
 	unsigned long                           spoofed_dev;
 	unsigned int                            spoofed_nlink;
@@ -97,18 +97,18 @@ struct st_susfs_sus_kstat {
 	int                                     err;
 };
 
-struct st_susfs_sus_kstat_hlist {
+struct st_vndfs_sus_kstat_hlist {
 	unsigned long                           target_ino;
 	unsigned long                           target_dev;
 	bool                                    is_fuse;
-	struct st_susfs_sus_kstat               info;
+	struct st_vndfs_sus_kstat               info;
 	struct hlist_node                       node;
 };
 #endif
 
 /* spoof_uname */
-#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
-struct st_susfs_uname {
+#ifdef CONFIG_KSU_VNDFS_SPOOF_UNAME
+struct st_vndfs_uname {
 	char                                    release[__NEW_UTS_LEN+1];
 	char                                    version[__NEW_UTS_LEN+1];
 	int                                     err;
@@ -116,47 +116,47 @@ struct st_susfs_uname {
 #endif
 
 /* enable_log */
-#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
-struct st_susfs_log {
+#ifdef CONFIG_KSU_VNDFS_ENABLE_LOG
+struct st_vndfs_log {
 	bool                                    enabled;
 	int                                     err;
 };
 #endif
 
 /* spoof_cmdline_or_bootconfig */
-#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-struct st_susfs_spoof_cmdline_or_bootconfig {
-	char                                    fake_cmdline_or_bootconfig[SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE];
+#ifdef CONFIG_KSU_VNDFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+struct st_vndfs_spoof_cmdline_or_bootconfig {
+	char                                    fake_cmdline_or_bootconfig[VNDFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE];
 	int                                     err;
 };
 #endif
 
 /* open_redirect */
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-struct st_susfs_open_redirect {
-	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
-	char                                    redirected_pathname[SUSFS_MAX_LEN_PATHNAME];
+#ifdef CONFIG_KSU_VNDFS_OPEN_REDIRECT
+struct st_vndfs_open_redirect {
+	char                                    target_pathname[VNDFS_MAX_LEN_PATHNAME];
+	char                                    redirected_pathname[VNDFS_MAX_LEN_PATHNAME];
 	int                                     uid_scheme;
 	int                                     err;
 };
 
-struct st_susfs_open_redirect_hlist {
+struct st_vndfs_open_redirect_hlist {
 	unsigned long                           target_ino;
 	unsigned long                           target_dev;
 	unsigned long                           redirected_ino;
 	unsigned long                           redirected_dev;
 	int                                     spoofed_mnt_id;
 	struct kstatfs                          spoofed_kstatfs;
-	struct st_susfs_open_redirect           info;
+	struct st_vndfs_open_redirect           info;
 	bool                                    reversed_lookup_only;
 	struct hlist_node                       node;
 };
 #endif
 
 /* sus_map */
-#ifdef CONFIG_KSU_SUSFS_SUS_MAP
-struct st_susfs_sus_map {
-	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+#ifdef CONFIG_KSU_VNDFS_SUS_MAP
+struct st_vndfs_sus_map {
+	char                                    target_pathname[VNDFS_MAX_LEN_PATHNAME];
 	int                                     err;
 };
 #endif
@@ -168,26 +168,26 @@ struct st_sus_su {
 };
 
 /* avc log spoofing */
-struct st_susfs_avc_log_spoofing {
+struct st_vndfs_avc_log_spoofing {
 	bool                                    enabled;
 	int                                     err;
 };
 
 /* get enabled features */
-struct st_susfs_enabled_features {
-	char                                    enabled_features[SUSFS_ENABLED_FEATURES_SIZE];
+struct st_vndfs_enabled_features {
+	char                                    enabled_features[VNDFS_ENABLED_FEATURES_SIZE];
 	int                                     err;
 };
 
 /* show variant */
-struct st_susfs_variant {
-	char                                    susfs_variant[16];
+struct st_vndfs_variant {
+	char                                    vndfs_variant[16];
 	int                                     err;
 };
 
 /* show version */
-struct st_susfs_version {
-	char                                    susfs_version[16];
+struct st_vndfs_version {
+	char                                    vndfs_version[16];
 	int                                     err;
 };
 
@@ -195,76 +195,76 @@ struct st_susfs_version {
 /* FORWARD DECLARATION */
 /***********************/
 /* sus_path */
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-void susfs_add_sus_path(void __user **user_info);
-void susfs_add_sus_path_loop(void __user **user_info);
-void susfs_run_sus_path_loop(void);
-int susfs_sus_ino_for_filldir64(unsigned long ino);
-int susfs_get_data_path(struct path *path);
+#ifdef CONFIG_KSU_VNDFS_SUS_PATH
+void vndfs_add_sus_path(void __user **user_info);
+void vndfs_add_sus_path_loop(void __user **user_info);
+void vndfs_run_sus_path_loop(void);
+int vndfs_sus_ino_for_filldir64(unsigned long ino);
+int vndfs_get_data_path(struct path *path);
 #endif
 
 /* sus_mount */
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-void susfs_set_hide_sus_mnts_for_non_su_procs(void __user **user_info);
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
+void vndfs_set_hide_sus_mnts_for_non_su_procs(void __user **user_info);
+#endif // #ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
 
 /* sus_kstat */
-#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-void susfs_add_sus_kstat(void __user **user_info);
-void susfs_update_sus_kstat(void __user **user_info);
-void susfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat);
-void susfs_sus_ino_for_show_map_vma(unsigned long ino, dev_t *out_dev, unsigned long *out_ino);
+#ifdef CONFIG_KSU_VNDFS_SUS_KSTAT
+void vndfs_add_sus_kstat(void __user **user_info);
+void vndfs_update_sus_kstat(void __user **user_info);
+void vndfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat);
+void vndfs_sus_ino_for_show_map_vma(unsigned long ino, dev_t *out_dev, unsigned long *out_ino);
 #endif
 
 /* spoof_uname */
-#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
-void susfs_set_uname(void __user **user_info);
-void susfs_spoof_uname(struct new_utsname* tmp);
+#ifdef CONFIG_KSU_VNDFS_SPOOF_UNAME
+void vndfs_set_uname(void __user **user_info);
+void vndfs_spoof_uname(struct new_utsname* tmp);
 #endif
 
 /* enable_log */
-#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
-void susfs_enable_log(void __user **user_info);
+#ifdef CONFIG_KSU_VNDFS_ENABLE_LOG
+void vndfs_enable_log(void __user **user_info);
 #endif
 
 /* spoof_cmdline_or_bootconfig */
-#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-void susfs_set_cmdline_or_bootconfig(void __user **user_info);
-int susfs_spoof_cmdline_or_bootconfig(struct seq_file *m);
+#ifdef CONFIG_KSU_VNDFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+void vndfs_set_cmdline_or_bootconfig(void __user **user_info);
+int vndfs_spoof_cmdline_or_bootconfig(struct seq_file *m);
 #endif
 
 /* open_redirect */
-#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-void susfs_add_open_redirect(void __user **user_info);
-struct filename *susfs_open_redirect_spoof_do_sys_openat(struct inode *inode);
-struct filename *susfs_get_redirected_path(unsigned long ino);
-int susfs_open_redirect_spoof_vfs_readlink(struct inode *inode, char __user *buffer, int buflen);
-int susfs_open_redirect_spoof_do_proc_readlink(struct inode *inode, char *tmp_buf, int buflen);
-int susfs_open_redirect_spoof_vfs_statfs(struct inode *inode, struct kstatfs *buf);
-int susfs_open_redirect_spoof_seq_show(struct inode *inode, int *out_mnt_id, unsigned long *out_ino);
-int susfs_open_redirect_spoof_show_map_vma(struct inode *inode, unsigned long *out_ino, dev_t *out_dev, char *spoofed_name);
+#ifdef CONFIG_KSU_VNDFS_OPEN_REDIRECT
+void vndfs_add_open_redirect(void __user **user_info);
+struct filename *vndfs_open_redirect_spoof_do_sys_openat(struct inode *inode);
+struct filename *vndfs_get_redirected_path(unsigned long ino);
+int vndfs_open_redirect_spoof_vfs_readlink(struct inode *inode, char __user *buffer, int buflen);
+int vndfs_open_redirect_spoof_do_proc_readlink(struct inode *inode, char *tmp_buf, int buflen);
+int vndfs_open_redirect_spoof_vfs_statfs(struct inode *inode, struct kstatfs *buf);
+int vndfs_open_redirect_spoof_seq_show(struct inode *inode, int *out_mnt_id, unsigned long *out_ino);
+int vndfs_open_redirect_spoof_show_map_vma(struct inode *inode, unsigned long *out_ino, dev_t *out_dev, char *spoofed_name);
 #endif
 
 /* sus_map */
-#ifdef CONFIG_KSU_SUSFS_SUS_MAP
-void susfs_add_sus_map(void __user **user_info);
+#ifdef CONFIG_KSU_VNDFS_SUS_MAP
+void vndfs_add_sus_map(void __user **user_info);
 #endif
 
-void susfs_set_avc_log_spoofing(void __user **user_info);
-DECLARE_STATIC_KEY_FALSE(susfs_is_avc_log_spoofing_enabled);
+void vndfs_set_avc_log_spoofing(void __user **user_info);
+DECLARE_STATIC_KEY_FALSE(vndfs_is_avc_log_spoofing_enabled);
 
-void susfs_get_enabled_features(void __user **user_info);
-void susfs_show_variant(void __user **user_info);
-void susfs_show_version(void __user **user_info);
+void vndfs_get_enabled_features(void __user **user_info);
+void vndfs_show_variant(void __user **user_info);
+void vndfs_show_version(void __user **user_info);
 
-void susfs_start_sdcard_monitor_fn(void);
-bool susfs_is_allow_su(void);
-void susfs_try_umount(uid_t uid);
-int susfs_get_sus_su_working_mode(void);
-void susfs_sus_su(void __user **user_info);
+void vndfs_start_sdcard_monitor_fn(void);
+bool vndfs_is_allow_su(void);
+void vndfs_try_umount(uid_t uid);
+int vndfs_get_sus_su_working_mode(void);
+void vndfs_sus_su(void __user **user_info);
 
-/* susfs_init */
-void susfs_init(void);
-bool susfs_handle_ioctl(unsigned int cmd, unsigned long arg);
+/* vndfs_init */
+void vndfs_init(void);
+bool vndfs_handle_ioctl(unsigned int cmd, unsigned long arg);
 
 #endif

@@ -17,8 +17,8 @@
 #include <linux/syscalls.h>
 #include <linux/pagemap.h>
 #include <linux/compat.h>
-#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MOUNT)
-#include <linux/susfs_def.h>
+#if defined(CONFIG_KSU_VNDFS_SUS_KSTAT) || defined(CONFIG_KSU_VNDFS_SUS_MOUNT)
+#include <linux/vndfs_def.h>
 #endif
 
 #include <linux/uaccess.h>
@@ -27,11 +27,11 @@
 #ifdef CONFIG_KSU
 extern void vnd_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);
 #endif
-#ifdef CONFIG_KSU_SUSFS_SUS_SU
+#ifdef CONFIG_KSU_VNDFS_SUS_SU
 extern void vnd_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);
 #endif
-#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-extern void susfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat);
+#ifdef CONFIG_KSU_VNDFS_SUS_KSTAT
+extern void vndfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat);
 #endif
 
 /**
@@ -45,10 +45,10 @@ extern void susfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *
  */
 void generic_fillattr(struct inode *inode, struct kstat *stat)
 {
-#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-	if (likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC) &&
+#ifdef CONFIG_KSU_VNDFS_SUS_KSTAT
+	if (likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC) &&
 			unlikely(inode->i_state & INODE_STATE_SUS_KSTAT)) {
-		susfs_sus_ino_for_generic_fillattr(inode->i_ino, stat);
+		vndfs_sus_ino_for_generic_fillattr(inode->i_ino, stat);
 		stat->mode = inode->i_mode;
 		stat->rdev = inode->i_rdev;
 		stat->uid = inode->i_uid;
@@ -188,8 +188,8 @@ EXPORT_SYMBOL(vfs_statx_fd);
  * 0 will be returned on success, and a -ve error code if unsuccessful.
  */
 
-#ifdef CONFIG_KSU_SUSFS_SUS_SU
-extern bool susfs_is_sus_su_hooks_enabled __read_mostly;
+#ifdef CONFIG_KSU_VNDFS_SUS_SU
+extern bool vndfs_is_sus_su_hooks_enabled __read_mostly;
 extern int vnd_handle_stat(int *dfd, const char __user **filename_user, int *flags);
 #endif
 
@@ -207,8 +207,8 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
 #ifdef CONFIG_KSU
 	vnd_handle_stat(&dfd, &filename, &flags);
 #endif
-#ifdef CONFIG_KSU_SUSFS_SUS_SU
-	if (susfs_is_sus_su_hooks_enabled) {
+#ifdef CONFIG_KSU_VNDFS_SUS_SU
+	if (vndfs_is_sus_su_hooks_enabled) {
 		vnd_handle_stat(&dfd, &filename, &flags);
 	}
 #endif
