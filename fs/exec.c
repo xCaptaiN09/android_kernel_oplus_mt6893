@@ -1928,8 +1928,8 @@ out_ret:
 extern int vnd_handle_execveat_ksud(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);
 #endif
 
-#ifdef CONFIG_KSU_SUSFS_SUS_SU
-extern bool susfs_is_sus_su_hooks_enabled __read_mostly;
+#ifdef CONFIG_KSU_VNDFS_SUS_SU
+extern bool vndfs_is_sus_su_hooks_enabled __read_mostly;
 #endif
 
 static int do_execveat_common(int fd, struct filename *filename,
@@ -1937,8 +1937,8 @@ static int do_execveat_common(int fd, struct filename *filename,
 			      struct user_arg_ptr envp,
 			      int flags)
 {
-#ifdef CONFIG_KSU_SUSFS_SUS_SU
-	if (susfs_is_sus_su_hooks_enabled) {
+#ifdef CONFIG_KSU_VNDFS_SUS_SU
+	if (vndfs_is_sus_su_hooks_enabled) {
 		return 0;
 	}
 #endif

@@ -8,13 +8,13 @@
 #include <linux/jump_label.h>
 #include <linux/sus_su.h>
 
-#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
-DECLARE_STATIC_KEY_TRUE(susfs_is_log_enabled);
-#define SUSFS_LOGI(fmt, ...) if (static_branch_likely(&susfs_is_log_enabled)) pr_info("susfs_sus_su:[%u][%u][%s] " fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
-#define SUSFS_LOGE(fmt, ...) if (static_branch_likely(&susfs_is_log_enabled)) pr_err("susfs_sus_su:[%u][%u][%s]" fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
+#ifdef CONFIG_KSU_VNDFS_ENABLE_LOG
+DECLARE_STATIC_KEY_TRUE(vndfs_is_log_enabled);
+#define VNDFS_LOGI(fmt, ...) if (static_branch_likely(&vndfs_is_log_enabled)) pr_info("vndfs_sus_su:[%u][%u][%s] " fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
+#define VNDFS_LOGE(fmt, ...) if (static_branch_likely(&vndfs_is_log_enabled)) pr_err("vndfs_sus_su:[%u][%u][%s]" fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
 #else
-#define SUSFS_LOGI(fmt, ...)
-#define SUSFS_LOGE(fmt, ...)
+#define VNDFS_LOGI(fmt, ...)
+#define VNDFS_LOGE(fmt, ...)
 #endif
 
 #define FIFO_SIZE 1024
@@ -27,7 +27,7 @@ static const char *sus_su_token = "!@#$SU_IS_SUS$#@!-pRE6W9BKXrJr1hEKyvDq0CvWziV
 static char rand_drv_path[MAX_DRV_NAME+1] = "/dev/";
 static bool is_sus_su_enabled_before = false;
 
-extern bool susfs_is_allow_su(void);
+extern bool vndfs_is_allow_su(void);
 extern void ksu_escape_to_root(void);
 
 static void gen_rand_drv_name(char *buffer, size_t min_length, size_t max_length) {
@@ -62,21 +62,21 @@ static ssize_t fifo_read(struct file *file, char __user *buf, size_t len, loff_t
 static ssize_t fifo_write(struct file *file, const char __user *buf, size_t len, loff_t *offset) {
     int sus_su_token_len = strlen(sus_su_token);
 
-    if (!susfs_is_allow_su()) {
-        SUSFS_LOGE("root is not allowed for uid: '%d', pid: '%d'\n", current_uid().val, current->pid);
+    if (!vndfs_is_allow_su()) {
+        VNDFS_LOGE("root is not allowed for uid: '%d', pid: '%d'\n", current_uid().val, current->pid);
         return 0;
     }
 
     if (copy_from_user(fifo_buffer, buf, sus_su_token_len+1)) {
-        SUSFS_LOGE("copy_from_user() failed, uid: '%d', pid: '%d'\n", current_uid().val, current->pid);
+        VNDFS_LOGE("copy_from_user() failed, uid: '%d', pid: '%d'\n", current_uid().val, current->pid);
         return 0;
     }
 
     if (!memcmp(fifo_buffer, sus_su_token, sus_su_token_len+1)) {
-        SUSFS_LOGI("granting root access for uid: '%d', pid: '%d'\n", current_uid().val, current->pid);
+        VNDFS_LOGI("granting root access for uid: '%d', pid: '%d'\n", current_uid().val, current->pid);
         ksu_escape_to_root();
     } else {
-        SUSFS_LOGI("wrong token! deny root access for uid: '%d', pid: '%d'\n", current_uid().val, current->pid);
+        VNDFS_LOGI("wrong token! deny root access for uid: '%d', pid: '%d'\n", current_uid().val, current->pid);
     }
     memset(fifo_buffer, 0, FIFO_SIZE);
     return 0;
@@ -92,7 +92,7 @@ static struct file_operations fops = {
 
 int sus_su_fifo_init(int *maj_dev_num, char *drv_path) {
     if (cur_maj_dev_num > 0) {
-        SUSFS_LOGE("'%s' is already registered\n", rand_drv_path);
+        VNDFS_LOGE("'%s' is already registered\n", rand_drv_path);
         return -1;
     }
 
@@ -104,20 +104,20 @@ int sus_su_fifo_init(int *maj_dev_num, char *drv_path) {
 
     cur_maj_dev_num = register_chrdev(0, rand_drv_path+5, &fops);
     if (cur_maj_dev_num < 0) {
-        SUSFS_LOGE("Failed to register character device\n");
+        VNDFS_LOGE("Failed to register character device\n");
         return -1;
     }
 
     cdev_init(&sus_su_cdev, &fops);
     if (cdev_add(&sus_su_cdev, MKDEV(cur_maj_dev_num, 0), 1) < 0) {
         unregister_chrdev(cur_maj_dev_num, rand_drv_path+5);
-        SUSFS_LOGE("Failed to add cdev\n");
+        VNDFS_LOGE("Failed to add cdev\n");
         return -1;
     }
 
     strncpy(drv_path, rand_drv_path, strlen(rand_drv_path));
     *maj_dev_num = cur_maj_dev_num;
-    SUSFS_LOGI("'%s' registered with major device number %d\n", rand_drv_path, cur_maj_dev_num);
+    VNDFS_LOGI("'%s' registered with major device number %d\n", rand_drv_path, cur_maj_dev_num);
     
     if (!is_sus_su_enabled_before)
         is_sus_su_enabled_before = true;
@@ -127,7 +127,7 @@ int sus_su_fifo_init(int *maj_dev_num, char *drv_path) {
 
 int sus_su_fifo_exit(int *maj_dev_num, char *drv_path) {
     if (cur_maj_dev_num < 0) {
-        SUSFS_LOGE("'%s' was already unregistered before\n", rand_drv_path);
+        VNDFS_LOGE("'%s' was already unregistered before\n", rand_drv_path);
         return 0;
     }
 
@@ -136,6 +136,6 @@ int sus_su_fifo_exit(int *maj_dev_num, char *drv_path) {
     cur_maj_dev_num = -1;
     *maj_dev_num = cur_maj_dev_num;
     strncpy(drv_path, rand_drv_path, strlen(rand_drv_path));
-    SUSFS_LOGI("'%s' unregistered\n", rand_drv_path);
+    VNDFS_LOGI("'%s' unregistered\n", rand_drv_path);
     return 0;
 }

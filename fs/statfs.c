@@ -9,8 +9,8 @@
 #include <linux/security.h>
 #include <linux/uaccess.h>
 #include <linux/compat.h>
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-#include <linux/susfs_def.h>
+#ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
+#include <linux/vndfs_def.h>
 #include "mount.h"
 #endif
 #include "internal.h"
@@ -74,11 +74,11 @@ static int statfs_by_dentry(struct dentry *dentry, struct kstatfs *buf)
 int vfs_statfs(const struct path *path, struct kstatfs *buf)
 {
 	int error;
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
 	struct mount *mnt;
 
 	mnt = real_mount(path->mnt);
-	if (likely(current->susfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
+	if (likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
 		for (; mnt->mnt_id >= DEFAULT_SUS_MNT_ID; mnt = mnt->mnt_parent) {}
 	}
 	error = statfs_by_dentry(mnt->mnt.mnt_root, buf);
@@ -109,7 +109,7 @@ retry:
 			goto retry;
 		}
 	}
-#ifdef CONFIG_KSU_SUSFS_SUS_OVERLAYFS
+#ifdef CONFIG_KSU_VNDFS_SUS_OVERLAYFS
 	/* - When mounting overlay, the f_flags are set with 'ro' and 'relatime',
 	 *   but this is an abnormal status, as when we inspect the output from mountinfo,
 	 *   we will find that all partitions set with 'ro' will have 'noatime' set as well.
@@ -136,7 +136,7 @@ int fd_statfs(int fd, struct kstatfs *st)
 		error = vfs_statfs(&f.file->f_path, st);
 		fdput(f);
 	}
-#ifdef CONFIG_KSU_SUSFS_SUS_OVERLAYFS
+#ifdef CONFIG_KSU_VNDFS_SUS_OVERLAYFS
 	if (unlikely((st->f_flags & ST_RDONLY) && (st->f_flags & ST_RELATIME))) {
 		st->f_flags &= ~ST_RELATIME;
 		st->f_flags |= ST_NOATIME;
@@ -262,7 +262,7 @@ static int vfs_ustat(dev_t dev, struct kstatfs *sbuf)
 	if (!s)
 		return -EINVAL;
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_KSU_VNDFS_SUS_MOUNT
 	if (unlikely(s->s_root->d_inode->i_state & INODE_STATE_SUS_MOUNT)) {
 		return -EINVAL;
 	}

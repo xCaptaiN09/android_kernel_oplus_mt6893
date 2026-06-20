@@ -776,8 +776,8 @@ asmlinkage __visible void __init start_kernel(void)
 	}
 
 	/* Do the rest non-__init'ed, we're now alive */
-	extern void susfs_init(void);
-	susfs_init();
+	extern void vndfs_init(void);
+	vndfs_init();
 	rest_init();
 
 	prevent_tail_call_optimization();
