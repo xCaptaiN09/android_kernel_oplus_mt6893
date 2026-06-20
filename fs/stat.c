@@ -21,6 +21,7 @@
 #include <linux/vndfs_def.h>
 #endif
 
+extern void vnd_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
 
@@ -28,7 +29,6 @@
 extern void vnd_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);
 #endif
 #ifdef CONFIG_KSU_VNDFS_SUS_SU
-extern void vnd_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);
 #endif
 #ifdef CONFIG_KSU_VNDFS_SUS_KSTAT
 extern void vndfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat);
