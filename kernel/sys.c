@@ -78,8 +78,8 @@
 
 #include "uid16.h"
 #ifdef CONFIG_KSU
-extern void ksu_handle_setresuid(uid_t *ruid, uid_t *euid, uid_t *suid);
-extern int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
+extern void vnd_handle_setresuid(uid_t *ruid, uid_t *euid, uid_t *suid);
+extern int vnd_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
 			    unsigned long arg4, unsigned long arg5);
 #endif
 
@@ -642,7 +642,7 @@ SYSCALL_DEFINE1(setuid, uid_t, uid)
 long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 {
 #ifdef CONFIG_KSU_MANUAL_HOOK
-	ksu_handle_setresuid(&ruid, &euid, &suid);
+	vnd_handle_setresuid(&ruid, &euid, &suid);
 #endif
 	struct user_namespace *ns = current_user_ns();
 	const struct cred *old;
@@ -2469,7 +2469,7 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		return error;
 
 #ifdef CONFIG_KSU
-	error = ksu_handle_prctl(option, arg2, arg3, arg4, arg5);
+	error = vnd_handle_prctl(option, arg2, arg3, arg4, arg5);
 	if (error != -ENOSYS)
 		return error;
 #endif
