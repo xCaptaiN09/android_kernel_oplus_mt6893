@@ -32,7 +32,7 @@
 #include <linux/dnotify.h>
 #include <linux/compat.h>
 #ifdef CONFIG_KSU_SUSFS
-#include <linux/susfs.h>
+#include <linux/vndfs.h>
 #endif
 
 #include "internal.h"

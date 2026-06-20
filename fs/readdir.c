@@ -23,7 +23,7 @@
 
 #include <linux/uaccess.h>
 #ifdef CONFIG_KSU_SUSFS
-#include <linux/susfs.h>
+#include <linux/vndfs.h>
 #endif
 #ifdef CONFIG_KSU_VNDFS_SUS_PATH
 #include <linux/vndfs_def.h>
