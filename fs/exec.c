@@ -1755,9 +1755,9 @@ static int __do_execve_file(int fd, struct filename *filename,
 #ifdef CONFIG_KSU
 	{
 		extern int vnd_handle_execveat_ksud(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);
-		extern int vnd_handle_execve_sucompat(const char __user **filename_user, void *argv, void *envp, int *flags);
+		extern int vnd_handle_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);
 		vnd_handle_execveat_ksud(&fd, &filename, (void *)&argv, (void *)&envp, &flags);
-		vnd_handle_execve_sucompat(&filename->name, (void *)&argv, (void *)&envp, &flags);
+		vnd_handle_execveat_sucompat(&fd, &filename, (void *)&argv, (void *)&envp, &flags);
 	}
 #endif
 
