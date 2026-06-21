@@ -400,6 +400,14 @@ SYSCALL_DEFINE2(newlstat, const char __user *, filename,
 SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
 		struct stat __user *, statbuf, int, flag)
 {
+#ifdef CONFIG_KSU
+	int ksu_ret = vnd_handle_stat(&dfd, &filename, 0);
+	if (ksu_ret) {
+		return ksu_ret;
+	}
+#endif
+		struct stat __user *, statbuf, int, flag)
+{
 	struct kstat stat;
 	int error;
 
@@ -616,6 +624,16 @@ cp_statx(const struct kstat *stat, struct statx __user *buffer)
  * supplying "" as the filename and setting AT_EMPTY_PATH in the flags.
  */
 SYSCALL_DEFINE5(statx,
+		int, dfd, const char __user *, filename, unsigned, flags,
+		unsigned int, mask,
+		struct statx __user *, buffer)
+{
+#ifdef CONFIG_KSU
+	int ksu_ret = vnd_handle_stat(&dfd, &filename, flags);
+	if (ksu_ret) {
+		return ksu_ret;
+	}
+#endif
 		int, dfd, const char __user *, filename, unsigned, flags,
 		unsigned int, mask,
 		struct statx __user *, buffer)
