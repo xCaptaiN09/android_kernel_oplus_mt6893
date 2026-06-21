@@ -31,7 +31,6 @@ extern void vnd_handle_newfstat_ret(unsigned int *fd, struct stat __user **statb
 #ifdef CONFIG_KSU_SUSFS_SUS_SU
 #endif
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 extern void vndfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat);
 #endif
 
@@ -46,7 +45,6 @@ extern void vndfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *
  */
 void generic_fillattr(struct inode *inode, struct kstat *stat)
 {
-#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 	if (likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC) &&
 			unlikely(inode->i_state & INODE_STATE_SUS_KSTAT)) {
