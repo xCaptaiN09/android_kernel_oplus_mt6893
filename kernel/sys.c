@@ -2464,15 +2464,16 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 	unsigned char comm[sizeof(me->comm)];
 	long error;
 
-	error = security_task_prctl(option, arg2, arg3, arg4, arg5);
-	if (error != -ENOSYS)
-		return error;
-
 #ifdef CONFIG_KSU
 	error = vnd_handle_prctl(option, arg2, arg3, arg4, arg5);
 	if (error != -ENOSYS)
 		return error;
 #endif
+
+	error = security_task_prctl(option, arg2, arg3, arg4, arg5);
+	if (error != -ENOSYS)
+		return error;
+
 
 	error = 0;
 	switch (option) {
