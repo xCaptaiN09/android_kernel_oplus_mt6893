@@ -31,6 +31,7 @@ extern void vnd_handle_newfstat_ret(unsigned int *fd, struct stat __user **statb
 #ifdef CONFIG_KSU_SUSFS_SUS_SU
 #endif
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 extern void vndfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat);
 #endif
 
@@ -45,6 +46,7 @@ extern void vndfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *
  */
 void generic_fillattr(struct inode *inode, struct kstat *stat)
 {
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 	if (likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC) &&
 			unlikely(inode->i_state & INODE_STATE_SUS_KSTAT)) {
@@ -401,10 +403,7 @@ SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
 		struct stat __user *, statbuf, int, flag)
 {
 #ifdef CONFIG_KSU
-	int ksu_ret = vnd_handle_stat(&dfd, &filename, 0);
-	if (ksu_ret) {
-		return ksu_ret;
-	}
+	vnd_handle_stat(&dfd, &filename, 0);
 #endif
 	struct kstat stat;
 	int error;
@@ -627,10 +626,7 @@ SYSCALL_DEFINE5(statx,
 		struct statx __user *, buffer)
 {
 #ifdef CONFIG_KSU
-	int ksu_ret = vnd_handle_stat(&dfd, &filename, flags);
-	if (ksu_ret) {
-		return ksu_ret;
-	}
+	vnd_handle_stat(&dfd, &filename, flags);
 #endif
 	struct kstat stat;
 	int error;
