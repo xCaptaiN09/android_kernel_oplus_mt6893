@@ -406,8 +406,6 @@ SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
 		return ksu_ret;
 	}
 #endif
-		struct stat __user *, statbuf, int, flag)
-{
 	struct kstat stat;
 	int error;
 
