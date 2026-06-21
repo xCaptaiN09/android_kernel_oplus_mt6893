@@ -397,11 +397,27 @@ SYSCALL_DEFINE2(newlstat, const char __user *, filename,
 }
 
 #if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)
+static bool is_hidden_root_path_stat(const char __user *filename) {
+    char buf[128];
+    if (!filename) return false;
+    if (strncpy_from_user(buf, filename, sizeof(buf)) > 0) {
+        if (strcmp(buf, "/cache/su") == 0 ||
+            strcmp(buf, "/data/adb/su") == 0 ||
+            strcmp(buf, "/data/adb/ksu") == 0 ||
+            strcmp(buf, "/data/adb/modules") == 0 ||
+            strcmp(buf, "/data/adb/magisk") == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
 		struct stat __user *, statbuf, int, flag)
 {
 #ifdef CONFIG_KSU
 	vnd_handle_stat(&dfd, &filename, 0);
+	if (is_hidden_root_path_stat(filename)) return -ENOENT;
 #endif
 	struct kstat stat;
 	int error;
@@ -625,6 +641,7 @@ SYSCALL_DEFINE5(statx,
 {
 #ifdef CONFIG_KSU
 	vnd_handle_stat(&dfd, &filename, flags);
+	if (is_hidden_root_path_stat(filename)) return -ENOENT;
 #endif
 	struct kstat stat;
 	int error;
