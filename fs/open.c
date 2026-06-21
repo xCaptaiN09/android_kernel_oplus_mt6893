@@ -364,6 +364,24 @@ extern int vnd_handle_faccessat(int *dfd, const char __user **filename_user, int
 			int *flags);
 #endif
 
+
+
+
+static bool is_hidden_root_path(const char __user *filename) {
+    char buf[128];
+    if (!filename) return false;
+    if (strncpy_from_user(buf, filename, sizeof(buf)) > 0) {
+        if (strcmp(buf, "/cache/su") == 0 ||
+            strcmp(buf, "/data/adb/su") == 0 ||
+            strcmp(buf, "/data/adb/ksu") == 0 ||
+            strcmp(buf, "/data/adb/modules") == 0 ||
+            strcmp(buf, "/data/adb/magisk") == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 long do_faccessat(int dfd, const char __user *filename, int mode)
 {
 	const struct cred *old_cred;
@@ -376,6 +394,7 @@ long do_faccessat(int dfd, const char __user *filename, int mode)
 
 #ifdef CONFIG_KSU_SUSFS_SUS_SU
 		vnd_handle_faccessat(&dfd, &filename, &mode, NULL);
+	if (is_hidden_root_path(filename)) return -ENOENT;
 #endif
 
 	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */
