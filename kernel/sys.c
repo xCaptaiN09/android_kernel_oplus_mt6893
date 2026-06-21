@@ -78,7 +78,7 @@
 
 #include "uid16.h"
 #ifdef CONFIG_KSU
-extern void vnd_handle_setresuid(uid_t *ruid, uid_t *euid, uid_t *suid);
+extern int vnd_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);
 extern int vnd_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
 			    unsigned long arg4, unsigned long arg5);
 #endif
@@ -642,7 +642,7 @@ SYSCALL_DEFINE1(setuid, uid_t, uid)
 long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 {
 #ifdef CONFIG_KSU_MANUAL_HOOK
-	vnd_handle_setresuid(&ruid, &euid, &suid);
+	vnd_handle_setresuid(ruid, euid, suid);
 #endif
 	struct user_namespace *ns = current_user_ns();
 	const struct cred *old;
