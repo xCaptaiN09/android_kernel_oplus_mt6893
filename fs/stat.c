@@ -632,10 +632,6 @@ SYSCALL_DEFINE5(statx,
 		return ksu_ret;
 	}
 #endif
-		int, dfd, const char __user *, filename, unsigned, flags,
-		unsigned int, mask,
-		struct statx __user *, buffer)
-{
 	struct kstat stat;
 	int error;
 
