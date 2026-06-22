@@ -372,10 +372,22 @@ static bool is_hidden_root_path(const char __user *filename) {
     if (!filename) return false;
     if (strncpy_from_user(buf, filename, sizeof(buf)) > 0) {
         if (strcmp(buf, "/cache/su") == 0 ||
+            strcmp(buf, "/cache/su.bak") == 0 ||
+            strcmp(buf, "/cache/.su") == 0 ||
+            strcmp(buf, "/cache/su0") == 0 ||
+            strcmp(buf, "/cache/daemonsu") == 0 ||
+            strcmp(buf, "/cache/sush") == 0 ||
+            strcmp(buf, "/cache/busybox") == 0 ||
+            strcmp(buf, "/cache/magisk") == 0 ||
+            strcmp(buf, "/cache/ksud") == 0 ||
+            strcmp(buf, "/cache/resetprop") == 0 ||
+            strcmp(buf, "/cache/apd") == 0 ||
+            strcmp(buf, "/cache/supersu") == 0 ||
             strcmp(buf, "/data/adb/su") == 0 ||
             strcmp(buf, "/data/adb/ksu") == 0 ||
             strcmp(buf, "/data/adb/modules") == 0 ||
-            strcmp(buf, "/data/adb/magisk") == 0) {
+            strcmp(buf, "/data/adb/magisk") == 0 ||
+            strcmp(buf, "/data/adb/ksud") == 0) {
             return true;
         }
     }
