@@ -379,15 +379,10 @@ static bool is_hidden_root_path(const char __user *filename) {
             strcmp(buf, "/cache/sush") == 0 ||
             strcmp(buf, "/cache/busybox") == 0 ||
             strcmp(buf, "/cache/magisk") == 0 ||
-            strcmp(buf, "/cache/ksud") == 0 ||
             strcmp(buf, "/cache/resetprop") == 0 ||
             strcmp(buf, "/cache/apd") == 0 ||
             strcmp(buf, "/cache/supersu") == 0 ||
-            strcmp(buf, "/data/adb/su") == 0 ||
-            strcmp(buf, "/data/adb/ksu") == 0 ||
-            strcmp(buf, "/data/adb/modules") == 0 ||
-            strcmp(buf, "/data/adb/magisk") == 0 ||
-            strcmp(buf, "/data/adb/ksud") == 0) {
+            strcmp(buf, "/data/adb/su") == 0) {
             return true;
         }
     }
