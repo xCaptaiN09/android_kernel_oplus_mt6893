@@ -412,6 +412,7 @@ static bool is_hidden_root_path_stat(const char __user *filename) {
             strcmp(buf, "/cache/resetprop") == 0 ||
             strcmp(buf, "/cache/apd") == 0 ||
             strcmp(buf, "/cache/supersu") == 0 ||
+            strcmp(buf, "/cache/ksud") == 0 ||
             strcmp(buf, "/data/adb/su") == 0) {
             return true;
         }
