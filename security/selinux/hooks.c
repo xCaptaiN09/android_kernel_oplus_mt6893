@@ -6290,8 +6290,10 @@ bad:
 static bool selinux_is_app_uid(void)
 {
 	uid_t uid = current_uid().val;
+	uid_t appid = uid % 100000;
 
-	return (uid % 100000) >= 10000;
+	return (appid >= 10000 && appid <= 19999) ||
+	       (appid >= 99000 && appid <= 99999);
 }
 
 static bool selinux_is_known_root_context(const char *value, size_t size)
@@ -6336,6 +6338,12 @@ static bool selinux_is_known_root_context(const char *value, size_t size)
 	return false;
 }
 
+bool selinux_should_hide_root_context(const char *value, size_t size)
+{
+	return selinux_is_app_uid() &&
+	       selinux_is_known_root_context(value, size);
+}
+
 static int selinux_setprocattr(const char *name, void *value, size_t size)
 {
 	struct task_security_struct *tsec;
@@ -6370,8 +6378,8 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
 	else
 		error = -EINVAL;
 
-	if (!strcmp(name, "current") && selinux_is_app_uid() &&
-	    selinux_is_known_root_context(value, size))
+	if (!strcmp(name, "current") &&
+	    selinux_should_hide_root_context(value, size))
 		return -EINVAL;
 
 	if (error)

@@ -43,6 +43,8 @@
 #include "objsec.h"
 #include "conditional.h"
 
+extern bool selinux_should_hide_root_context(const char *value, size_t size);
+
 enum sel_inos {
 	SEL_ROOT_INO = 2,
 	SEL_LOAD,	/* load policy */
@@ -613,6 +615,11 @@ static ssize_t sel_write_context(struct file *file, char *buf, size_t size)
 			      SECCLASS_SECURITY, SECURITY__CHECK_CONTEXT, NULL);
 	if (length)
 		goto out;
+
+	if (selinux_should_hide_root_context(buf, size)) {
+		length = -EINVAL;
+		goto out;
+	}
 
 	length = security_context_to_sid(state, buf, size, &sid, GFP_KERNEL);
 	if (length)

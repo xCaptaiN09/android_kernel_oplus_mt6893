@@ -411,7 +411,11 @@ static bool is_hidden_root_path_stat(const char __user *filename)
 	       strcmp(buf, "/cache/apd") == 0 ||
 	       strcmp(buf, "/cache/supersu") == 0 ||
 	       strcmp(buf, "/cache/ksud") == 0 ||
-	       strcmp(buf, "/data/adb/su") == 0;
+	       strcmp(buf, "/data/adb/su") == 0 ||
+	       strcmp(buf, "/sdcard/twrp") == 0 ||
+	       strcmp(buf, "/sdcard/TWRP") == 0 ||
+	       strcmp(buf, "/storage/emulated/0/twrp") == 0 ||
+	       strcmp(buf, "/storage/emulated/0/TWRP") == 0;
 }
 
 SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
