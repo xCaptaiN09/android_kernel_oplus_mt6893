@@ -34,6 +34,7 @@
 #include <linux/lsm_hooks.h>
 #include <linux/xattr.h>
 #include <linux/capability.h>
+#include <linux/cred.h>
 #include <linux/unistd.h>
 #include <linux/mm.h>
 #include <linux/mman.h>
@@ -6286,6 +6287,55 @@ bad:
 	return error;
 }
 
+static bool selinux_is_app_uid(void)
+{
+	uid_t uid = current_uid().val;
+
+	return (uid % 100000) >= 10000;
+}
+
+static bool selinux_is_known_root_context(const char *value, size_t size)
+{
+	static const char *const root_contexts[] = {
+		"u:r:ksu:s0",
+		"u:r:ksu_file:s0",
+		"u:object_r:ksu_file:s0",
+		"u:r:magisk:s0",
+		"u:r:magisk_file:s0",
+		"u:object_r:magisk_file:s0",
+		"u:r:lsposed:s0",
+		"u:r:lsposed_file:s0",
+		"u:object_r:lsposed_file:s0",
+		"u:r:xposed:s0",
+		"u:r:xposed_file:s0",
+		"u:object_r:xposed_file:s0",
+		"u:r:xposed_data_file:s0",
+		"u:object_r:xposed_data_file:s0",
+		"u:r:msd:s0",
+		"u:r:msd_app:s0",
+		"u:r:msd_daemon:s0",
+		"u:object_r:msd_app:s0",
+		"u:object_r:msd_daemon:s0",
+	};
+	size_t i;
+
+	if (!value)
+		return false;
+
+	while (size && (value[size - 1] == '\n' || value[size - 1] == '\0'))
+		size--;
+
+	for (i = 0; i < ARRAY_SIZE(root_contexts); i++) {
+		size_t ctx_len = strlen(root_contexts[i]);
+
+		if (size == ctx_len &&
+		    !memcmp(value, root_contexts[i], ctx_len))
+			return true;
+	}
+
+	return false;
+}
+
 static int selinux_setprocattr(const char *name, void *value, size_t size)
 {
 	struct task_security_struct *tsec;
@@ -6319,6 +6369,11 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
 				     PROCESS__SETCURRENT, NULL);
 	else
 		error = -EINVAL;
+
+	if (!strcmp(name, "current") && selinux_is_app_uid() &&
+	    selinux_is_known_root_context(value, size))
+		return -EINVAL;
+
 	if (error)
 		return error;
 
