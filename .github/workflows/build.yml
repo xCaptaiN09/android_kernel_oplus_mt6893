@@ -2,7 +2,12 @@ name: Build Kernel
 
 on:
   push:
-    branches: [ sukisu-4.19, ksu-next-4.19 ]
+    branches:
+      - sukisu-4.19
+      - ksu-next-4.19
+      - KSUN-susfs-v2.1.0-manual-hook
+      - KSUN-RUI-susfs-v2.1.0-manual-hook
+      - fix/selinux-attr-current-probe-hide
   workflow_dispatch:
 
 jobs:
