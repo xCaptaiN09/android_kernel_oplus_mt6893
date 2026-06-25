@@ -188,11 +188,6 @@ EXPORT_SYMBOL(vfs_statx_fd);
  * 0 will be returned on success, and a -ve error code if unsuccessful.
  */
 
-#ifdef CONFIG_KSU_SUSFS_SUS_SU
-extern bool vndfs_is_sus_su_hooks_enabled __read_mostly;
-extern int vnd_handle_stat(int *dfd, const char __user **filename_user, int *flags);
-#endif
-
 #ifdef CONFIG_KSU
 extern int vnd_handle_stat(int *dfd, const char __user **filename_user, int *flags);
 #endif
@@ -206,11 +201,6 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
 
 #ifdef CONFIG_KSU
 	vnd_handle_stat(&dfd, &filename, &flags);
-#endif
-#ifdef CONFIG_KSU_SUSFS_SUS_SU
-	if (vndfs_is_sus_su_hooks_enabled) {
-		vnd_handle_stat(&dfd, &filename, &flags);
-	}
 #endif
 
 	if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
@@ -397,38 +387,44 @@ SYSCALL_DEFINE2(newlstat, const char __user *, filename,
 }
 
 #if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)
-static bool is_hidden_root_path_stat(const char __user *filename) {
-    char buf[128];
-    if (!filename) return false;
-    if (strncpy_from_user(buf, filename, sizeof(buf)) > 0) {
-        if (strcmp(buf, "/cache/su") == 0 ||
-            strcmp(buf, "/cache/su.bak") == 0 ||
-            strcmp(buf, "/cache/.su") == 0 ||
-            strcmp(buf, "/cache/su0") == 0 ||
-            strcmp(buf, "/cache/daemonsu") == 0 ||
-            strcmp(buf, "/cache/sush") == 0 ||
-            strcmp(buf, "/cache/busybox") == 0 ||
-            strcmp(buf, "/cache/magisk") == 0 ||
-            strcmp(buf, "/cache/resetprop") == 0 ||
-            strcmp(buf, "/cache/apd") == 0 ||
-            strcmp(buf, "/cache/supersu") == 0 ||
-            strcmp(buf, "/cache/ksud") == 0 ||
-            strcmp(buf, "/data/adb/su") == 0) {
-            return true;
-        }
-    }
-    return false;
+static bool is_hidden_root_path_stat(const char __user *filename)
+{
+	char buf[128];
+	long len;
+
+	if (!filename)
+		return false;
+
+	len = strncpy_from_user(buf, filename, sizeof(buf));
+	if (len <= 0 || len >= sizeof(buf))
+		return false;
+
+	return strcmp(buf, "/cache/su") == 0 ||
+	       strcmp(buf, "/cache/su.bak") == 0 ||
+	       strcmp(buf, "/cache/.su") == 0 ||
+	       strcmp(buf, "/cache/su0") == 0 ||
+	       strcmp(buf, "/cache/daemonsu") == 0 ||
+	       strcmp(buf, "/cache/sush") == 0 ||
+	       strcmp(buf, "/cache/busybox") == 0 ||
+	       strcmp(buf, "/cache/magisk") == 0 ||
+	       strcmp(buf, "/cache/resetprop") == 0 ||
+	       strcmp(buf, "/cache/apd") == 0 ||
+	       strcmp(buf, "/cache/supersu") == 0 ||
+	       strcmp(buf, "/cache/ksud") == 0 ||
+	       strcmp(buf, "/data/adb/su") == 0;
 }
 
 SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
 		struct stat __user *, statbuf, int, flag)
 {
-#ifdef CONFIG_KSU
-	vnd_handle_stat(&dfd, &filename, 0);
-	if (is_hidden_root_path_stat(filename)) return -ENOENT;
-#endif
 	struct kstat stat;
 	int error;
+
+#ifdef CONFIG_KSU
+	vnd_handle_stat(&dfd, &filename, &flag);
+	if (is_hidden_root_path_stat(filename))
+		return -ENOENT;
+#endif
 
 	error = vfs_fstatat(dfd, filename, &stat, flag);
 	if (error)
@@ -647,12 +643,16 @@ SYSCALL_DEFINE5(statx,
 		unsigned int, mask,
 		struct statx __user *, buffer)
 {
-#ifdef CONFIG_KSU
-	vnd_handle_stat(&dfd, &filename, flags);
-	if (is_hidden_root_path_stat(filename)) return -ENOENT;
-#endif
 	struct kstat stat;
 	int error;
+#ifdef CONFIG_KSU
+	int ksu_flags = flags;
+
+	vnd_handle_stat(&dfd, &filename, &ksu_flags);
+	flags = ksu_flags;
+	if (is_hidden_root_path_stat(filename))
+		return -ENOENT;
+#endif
 
 	if (mask & STATX__RESERVED)
 		return -EINVAL;

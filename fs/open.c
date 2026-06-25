@@ -359,35 +359,35 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
  */
 
 #ifdef CONFIG_KSU_SUSFS_SUS_SU
-extern bool vndfs_is_sus_su_hooks_enabled __read_mostly;
 extern int vnd_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
 			int *flags);
 #endif
 
+static bool is_hidden_root_path(const char __user *filename)
+{
+	char buf[128];
+	long len;
 
+	if (!filename)
+		return false;
 
+	len = strncpy_from_user(buf, filename, sizeof(buf));
+	if (len <= 0 || len >= sizeof(buf))
+		return false;
 
-static bool is_hidden_root_path(const char __user *filename) {
-    char buf[128];
-    if (!filename) return false;
-    if (strncpy_from_user(buf, filename, sizeof(buf)) > 0) {
-        if (strcmp(buf, "/cache/su") == 0 ||
-            strcmp(buf, "/cache/su.bak") == 0 ||
-            strcmp(buf, "/cache/.su") == 0 ||
-            strcmp(buf, "/cache/su0") == 0 ||
-            strcmp(buf, "/cache/daemonsu") == 0 ||
-            strcmp(buf, "/cache/sush") == 0 ||
-            strcmp(buf, "/cache/busybox") == 0 ||
-            strcmp(buf, "/cache/magisk") == 0 ||
-            strcmp(buf, "/cache/resetprop") == 0 ||
-            strcmp(buf, "/cache/apd") == 0 ||
-            strcmp(buf, "/cache/supersu") == 0 ||
-            strcmp(buf, "/cache/ksud") == 0 ||
-            strcmp(buf, "/data/adb/su") == 0) {
-            return true;
-        }
-    }
-    return false;
+	return strcmp(buf, "/cache/su") == 0 ||
+	       strcmp(buf, "/cache/su.bak") == 0 ||
+	       strcmp(buf, "/cache/.su") == 0 ||
+	       strcmp(buf, "/cache/su0") == 0 ||
+	       strcmp(buf, "/cache/daemonsu") == 0 ||
+	       strcmp(buf, "/cache/sush") == 0 ||
+	       strcmp(buf, "/cache/busybox") == 0 ||
+	       strcmp(buf, "/cache/magisk") == 0 ||
+	       strcmp(buf, "/cache/resetprop") == 0 ||
+	       strcmp(buf, "/cache/apd") == 0 ||
+	       strcmp(buf, "/cache/supersu") == 0 ||
+	       strcmp(buf, "/cache/ksud") == 0 ||
+	       strcmp(buf, "/data/adb/su") == 0;
 }
 
 long do_faccessat(int dfd, const char __user *filename, int mode)
@@ -401,8 +401,9 @@ long do_faccessat(int dfd, const char __user *filename, int mode)
 	unsigned int lookup_flags = LOOKUP_FOLLOW;
 
 #ifdef CONFIG_KSU_SUSFS_SUS_SU
-		vnd_handle_faccessat(&dfd, &filename, &mode, NULL);
-	if (is_hidden_root_path(filename)) return -ENOENT;
+	vnd_handle_faccessat(&dfd, &filename, &mode, NULL);
+	if (is_hidden_root_path(filename))
+		return -ENOENT;
 #endif
 
 	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */
