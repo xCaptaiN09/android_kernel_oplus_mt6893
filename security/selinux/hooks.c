@@ -6293,32 +6293,29 @@ static bool selinux_is_app_uid(void)
 	uid_t appid = uid % 100000;
 
 	return (appid >= 10000 && appid <= 19999) ||
-	       (appid >= 99000 && appid <= 99999);
+	       (appid >= 90000 && appid <= 99999);
 }
 
 static bool selinux_is_known_root_context(const char *value, size_t size)
 {
-	static const char *const root_contexts[] = {
-		"u:r:ksu:s0",
-		"u:r:ksu_file:s0",
-		"u:object_r:ksu_file:s0",
-		"u:r:magisk:s0",
-		"u:r:magisk_file:s0",
-		"u:object_r:magisk_file:s0",
-		"u:r:lsposed:s0",
-		"u:r:lsposed_file:s0",
-		"u:object_r:lsposed_file:s0",
-		"u:r:xposed:s0",
-		"u:r:xposed_file:s0",
-		"u:object_r:xposed_file:s0",
-		"u:r:xposed_data_file:s0",
-		"u:object_r:xposed_data_file:s0",
-		"u:r:msd:s0",
-		"u:r:msd_app:s0",
-		"u:r:msd_daemon:s0",
-		"u:object_r:msd_app:s0",
-		"u:object_r:msd_daemon:s0",
+	static const char *const root_types[] = {
+		"ksu",
+		"ksu_file",
+		"magisk",
+		"magisk_file",
+		"lsposed",
+		"lsposed_file",
+		"xposed",
+		"xposed_file",
+		"xposed_data_file",
+		"msd",
+		"msd_app",
+		"msd_daemon",
+		"droidspacesd",
 	};
+	const char *type_start;
+	const char *type_end;
+	unsigned int colons = 0;
 	size_t i;
 
 	if (!value)
@@ -6327,11 +6324,29 @@ static bool selinux_is_known_root_context(const char *value, size_t size)
 	while (size && (value[size - 1] == '\n' || value[size - 1] == '\0'))
 		size--;
 
-	for (i = 0; i < ARRAY_SIZE(root_contexts); i++) {
-		size_t ctx_len = strlen(root_contexts[i]);
+	type_start = value;
+	type_end = value + size;
 
-		if (size == ctx_len &&
-		    !memcmp(value, root_contexts[i], ctx_len))
+	for (i = 0; i < size; i++) {
+		if (value[i] != ':')
+			continue;
+		colons++;
+		if (colons == 2)
+			type_start = value + i + 1;
+		else if (colons == 3) {
+			type_end = value + i;
+			break;
+		}
+	}
+
+	if (colons < 3 || type_start >= type_end)
+		return false;
+
+	for (i = 0; i < ARRAY_SIZE(root_types); i++) {
+		size_t type_len = strlen(root_types[i]);
+
+		if ((size_t)(type_end - type_start) == type_len &&
+		    !memcmp(type_start, root_types[i], type_len))
 			return true;
 	}
 

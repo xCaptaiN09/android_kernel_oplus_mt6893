@@ -747,6 +747,11 @@ static ssize_t sel_write_validatetrans(struct file *file,
 	if (sscanf(req, "%s %s %hu %s", oldcon, newcon, &tclass, taskcon) != 4)
 		goto out;
 
+	if (selinux_should_hide_root_context(oldcon, strlen(oldcon)) ||
+	    selinux_should_hide_root_context(newcon, strlen(newcon)) ||
+	    selinux_should_hide_root_context(taskcon, strlen(taskcon)))
+		goto out;
+
 	rc = security_context_str_to_sid(state, oldcon, &osid, GFP_KERNEL);
 	if (rc)
 		goto out;
@@ -857,6 +862,10 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
 	if (sscanf(buf, "%s %s %hu", scon, tcon, &tclass) != 3)
 		goto out;
 
+	if (selinux_should_hide_root_context(scon, strlen(scon)) ||
+	    selinux_should_hide_root_context(tcon, strlen(tcon)))
+		goto out;
+
 	length = security_context_str_to_sid(state, scon, &ssid, GFP_KERNEL);
 	if (length)
 		goto out;
@@ -917,6 +926,11 @@ static ssize_t sel_write_create(struct file *file, char *buf, size_t size)
 	nargs = sscanf(buf, "%s %s %hu %s", scon, tcon, &tclass, namebuf);
 	if (nargs < 3 || nargs > 4)
 		goto out;
+
+	if (selinux_should_hide_root_context(scon, strlen(scon)) ||
+	    selinux_should_hide_root_context(tcon, strlen(tcon)))
+		goto out;
+
 	if (nargs == 4) {
 		/*
 		 * If and when the name of new object to be queried contains
@@ -1014,6 +1028,10 @@ static ssize_t sel_write_relabel(struct file *file, char *buf, size_t size)
 	if (sscanf(buf, "%s %s %hu", scon, tcon, &tclass) != 3)
 		goto out;
 
+	if (selinux_should_hide_root_context(scon, strlen(scon)) ||
+	    selinux_should_hide_root_context(tcon, strlen(tcon)))
+		goto out;
+
 	length = security_context_str_to_sid(state, scon, &ssid, GFP_KERNEL);
 	if (length)
 		goto out;
@@ -1073,6 +1091,9 @@ static ssize_t sel_write_user(struct file *file, char *buf, size_t size)
 
 	length = -EINVAL;
 	if (sscanf(buf, "%s %s", con, user) != 2)
+		goto out;
+
+	if (selinux_should_hide_root_context(con, strlen(con)))
 		goto out;
 
 	length = security_context_str_to_sid(state, con, &sid, GFP_KERNEL);
@@ -1138,6 +1159,10 @@ static ssize_t sel_write_member(struct file *file, char *buf, size_t size)
 
 	length = -EINVAL;
 	if (sscanf(buf, "%s %s %hu", scon, tcon, &tclass) != 3)
+		goto out;
+
+	if (selinux_should_hide_root_context(scon, strlen(scon)) ||
+	    selinux_should_hide_root_context(tcon, strlen(tcon)))
 		goto out;
 
 	length = security_context_str_to_sid(state, scon, &ssid, GFP_KERNEL);
