@@ -6378,8 +6378,7 @@ static int selinux_setprocattr(const char *name, void *value, size_t size)
 	else
 		error = -EINVAL;
 
-	if (!strcmp(name, "current") &&
-	    selinux_should_hide_root_context(value, size))
+	if (!strcmp(name, "current") && selinux_is_app_uid())
 		return -EINVAL;
 
 	if (error)
