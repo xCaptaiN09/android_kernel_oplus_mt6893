@@ -3133,7 +3133,9 @@ static bool should_skip_mm(struct mm_struct *mm, struct lru_gen_mm_walk *walk)
 	if (mm_is_oom_victim(mm))
 		return true;
 
-	return !mmget_not_zero(mm);
+	mmgrab(mm);
+
+	return false;
 }
 
 static bool iterate_mm_list(struct lruvec *lruvec, struct lru_gen_mm_walk *walk,
@@ -3158,7 +3160,7 @@ static bool iterate_mm_list(struct lruvec *lruvec, struct lru_gen_mm_walk *walk,
 	 *    mm stats counters for the next generation.
 	 */
 	if (*iter)
-		mmput_async(*iter);
+		mmdrop(*iter);
 	else if (walk->max_seq <= READ_ONCE(mm_state->seq))
 		return false;
 
