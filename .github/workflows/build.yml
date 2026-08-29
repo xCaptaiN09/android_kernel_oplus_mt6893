@@ -6,8 +6,8 @@ on:
       - sukisu-4.19
       - ksu-next-4.19
       - realme-ui-ksu
-      - KSUN-susfs-v2.1.0-manual-hook
-      - KSUN-RUI-susfs-v2.1.0-manual-hook
+      - KSUN-susfs-v2.2.0-manual-hook
+      - KSUN-RUI-susfs-v2.2.0-manual-hook
   workflow_dispatch:
 
 jobs:
