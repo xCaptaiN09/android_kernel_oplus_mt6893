@@ -5,6 +5,7 @@ on:
     branches:
       - sukisu-4.19
       - ksu-next-4.19
+      - KSUN-susfs-v2.2.0-manual-hook-mglru
       - KSUN-susfs-v2.2.0-manual-hook
       - KSUN-RUI-susfs-v2.2.0-manual-hook
       - fix/selinux-attr-current-probe-hide
