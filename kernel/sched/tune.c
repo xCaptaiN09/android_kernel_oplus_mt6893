@@ -138,12 +138,12 @@ static inline struct schedtune *parent_st(struct schedtune *st)
  */
 struct schedtune
 root_schedtune = {
-	.boost	= 0,
+	.boost	= 100,
 #ifdef CONFIG_SCHEDUTIL_USE_TL
 	.window_policy = 2,
 	.discount_wait_time = false,
 #endif
-	.prefer_idle = 0,
+	.prefer_idle = 1,
 };
 
 /*

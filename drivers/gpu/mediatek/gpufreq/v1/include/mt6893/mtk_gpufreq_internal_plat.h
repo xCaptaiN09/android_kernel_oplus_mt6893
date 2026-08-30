@@ -88,7 +88,7 @@
  * Battery Over Current Protect
  **************************************************/
 #define MT_GPUFREQ_BATT_OC_PROTECT              1
-#define MT_GPUFREQ_BATT_OC_LIMIT_FREQ           (485000)        /* KHz */
+#define MT_GPUFREQ_BATT_OC_LIMIT_FREQ           (886000)        /* KHz */
 
 /**************************************************
  * Battery Percentage Protect
@@ -100,7 +100,7 @@
  * Low Battery Volume Protect
  **************************************************/
 #define MT_GPUFREQ_LOW_BATT_VOLT_PROTECT        1
-#define MT_GPUFREQ_LOW_BATT_VOLT_LIMIT_FREQ     (485000)        /* KHz */
+#define MT_GPUFREQ_LOW_BATT_VOLT_LIMIT_FREQ     (886000)        /* KHz */
 
 /**************************************************
  * DFD Dump

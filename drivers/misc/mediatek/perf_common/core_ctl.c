@@ -101,7 +101,7 @@ module_param_named(debug_enable, debug_enable, bool, 0600);
 
 static DEFINE_SPINLOCK(state_lock);
 static bool initialized;
-static unsigned int default_min_cpus[MAX_CLUSTERS] = {4, 2, 0};
+static unsigned int default_min_cpus[MAX_CLUSTERS] = {4, 3, 1};
 
 static int arch_get_nr_clusters(void)
 {

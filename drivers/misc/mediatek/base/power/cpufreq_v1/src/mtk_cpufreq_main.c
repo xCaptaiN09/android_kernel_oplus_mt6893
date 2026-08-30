@@ -1209,6 +1209,7 @@ static int _mt_cpufreq_init(struct cpufreq_policy *policy)
 	cpu_dev = get_cpu_device(policy->cpu);
 
 	policy->cpuinfo.transition_latency = 1000;
+	policy->transition_delay_us = 1;
 
 	{
 		enum mt_cpu_dvfs_id id = _get_cpu_dvfs_id(policy->cpu);

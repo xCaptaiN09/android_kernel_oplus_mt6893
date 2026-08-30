@@ -700,21 +700,11 @@ int mt_cpufreq_dts_map(void)
 
 unsigned int _mt_cpufreq_get_cpu_level(void)
 {
-	unsigned int lv = CPU_LEVEL_0;
+	unsigned int lv = CPU_LEVEL_2;
 
 	int val = (get_devinfo_with_index(7) & 0xFF);
-	int wo_efuse = ((get_devinfo_with_index(132) >> 13) & 0x1);
 
-	if (val == 0x10)
-		lv = CPU_LEVEL_0;
-	else if (val == 0x40)
-		lv = CPU_LEVEL_1;
-	else if (wo_efuse == 0x0)
-		lv = CPU_LEVEL_0;
-	else if (wo_efuse == 0x1)
-		lv = CPU_LEVEL_1;
-
-	turbo_flag = 0;
+	turbo_flag = 1;
 
 	tag_pr_info("%d, %d, Settle time(%d, %d) efuse_val = 0x%x\n",
 		lv, turbo_flag, UP_SRATE, DOWN_SRATE, val);
