@@ -1271,6 +1271,18 @@ SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 	vndfs_spoof_uname(&tmp);
 #endif
+	/*
+	 * Android 17 bpfloader/netd gate BPF programs on kernel release.
+	 * Report 5.10.246 to these processes (5.10 BPF patch set is backported).
+	 * Placed after the SuSFS spoof so it is never overwritten.
+	 */
+	if (!strncmp(current->comm, "bpfloader", 9) ||
+	    !strncmp(current->comm, "netbpfload", 10) ||
+	    !strncmp(current->comm, "netd", 4) ||
+	    !strncmp(current->comm, "uprobestats", 11)) {
+		strscpy(tmp.release, "5.10.246", sizeof(tmp.release));
+		pr_debug("fake uname: %s release=%s\n", current->comm, tmp.release);
+	}
 	up_read(&uts_sem);
 	if (copy_to_user(name, &tmp, sizeof(tmp)))
 		return -EFAULT;
