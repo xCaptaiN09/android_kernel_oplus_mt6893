@@ -1639,7 +1639,7 @@ static struct dentry *lookup_dcache(const struct qstr *name,
 		}
 	}
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (!IS_ERR_OR_NULL(dentry) &&
+	if (!IS_ERR_OR_NULL(dentry) && d_backing_inode(dentry) &&
 	    vndfs_is_inode_sus_path(d_backing_inode(dentry))) {
 		dput(dentry);
 		return ERR_PTR(-ENOENT);
@@ -1684,7 +1684,7 @@ static struct dentry *__lookup_hash(const struct qstr *name,
 		dentry = old;
 	}
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (!IS_ERR_OR_NULL(dentry) &&
+	if (!IS_ERR_OR_NULL(dentry) && d_backing_inode(dentry) &&
 	    vndfs_is_inode_sus_path(d_backing_inode(dentry))) {
 		dput(dentry);
 		return ERR_PTR(-ENOENT);
@@ -1746,14 +1746,14 @@ static int lookup_fast(struct nameidata *nd,
 			if (unlikely(negative))
 				return -ENOENT;
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-			if (vndfs_is_inode_sus_path(*inode))
+			if (*inode && vndfs_is_inode_sus_path(*inode))
 				return -ENOENT;
 #endif
 			path->mnt = mnt;
 			path->dentry = dentry;
 			if (likely(__follow_mount_rcu(nd, path, inode, seqp))) {
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-				if (vndfs_is_inode_sus_path(*inode))
+				if (*inode && vndfs_is_inode_sus_path(*inode))
 					return -ENOENT;
 #endif
 				return 1;
@@ -1782,7 +1782,8 @@ static int lookup_fast(struct nameidata *nd,
 	}
 
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (vndfs_is_inode_sus_path(d_backing_inode(dentry))) {
+	if (d_backing_inode(dentry) &&
+	    vndfs_is_inode_sus_path(d_backing_inode(dentry))) {
 		dput(dentry);
 		return -ENOENT;
 	}
@@ -1793,7 +1794,7 @@ static int lookup_fast(struct nameidata *nd,
 	if (likely(err > 0)) {
 		*inode = d_backing_inode(path->dentry);
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-		if (vndfs_is_inode_sus_path(*inode)) {
+		if (*inode && vndfs_is_inode_sus_path(*inode)) {
 			path_put_conditional(path, nd);
 			return -ENOENT;
 		}
@@ -1844,7 +1845,7 @@ again:
 		}
 	}
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (!IS_ERR_OR_NULL(dentry) &&
+	if (!IS_ERR_OR_NULL(dentry) && d_backing_inode(dentry) &&
 	    vndfs_is_inode_sus_path(d_backing_inode(dentry))) {
 		dput(dentry);
 		return ERR_PTR(-ENOENT);
@@ -3419,7 +3420,8 @@ static int lookup_open(struct nameidata *nd, struct path *path,
 			dentry = res;
 		}
 	}
-	if (vndfs_is_inode_sus_path(d_backing_inode(dentry))) {
+	if (d_backing_inode(dentry) &&
+	    vndfs_is_inode_sus_path(d_backing_inode(dentry))) {
 		error = -ENOENT;
 		goto out_dput;
 	}
@@ -3488,7 +3490,8 @@ no_open:
 	}
 
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (vndfs_is_inode_sus_path(d_backing_inode(dentry))) {
+	if (d_backing_inode(dentry) &&
+	    vndfs_is_inode_sus_path(d_backing_inode(dentry))) {
 		error = -ENOENT;
 		goto out_dput;
 	}
@@ -3666,7 +3669,8 @@ finish_open:
 	if (error)
 		return error;
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (vndfs_is_inode_sus_path(d_backing_inode(nd->path.dentry))) {
+	if (d_backing_inode(nd->path.dentry) &&
+	    vndfs_is_inode_sus_path(d_backing_inode(nd->path.dentry))) {
 		error = -ENOENT;
 		goto out;
 	}
