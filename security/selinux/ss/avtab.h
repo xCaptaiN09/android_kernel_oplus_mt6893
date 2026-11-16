@@ -25,6 +25,17 @@
 
 #include "security.h"
 #include <linux/flex_array.h>
+#include <linux/gfp.h>
+
+/* Scoped allocation control for write-locked policy mutations. */
+#define SELINUX_POLICY_GFP_HELPERS 1
+struct avtab;
+struct avtab_node;
+struct avtab_key;
+struct avtab_datum;
+int avtab_alloc_gfp(struct avtab *h, u32 nrules, gfp_t gfp);
+struct avtab_node *avtab_insert_nonunique_gfp(struct avtab *h,
+	struct avtab_key *key, struct avtab_datum *datum, gfp_t gfp);
 
 struct avtab_key {
 	u16 source_type;	/* source type */

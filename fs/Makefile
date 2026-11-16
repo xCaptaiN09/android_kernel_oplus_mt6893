@@ -24,7 +24,11 @@ endif
 obj-$(CONFIG_PROC_FS) += proc_namespace.o
 
 obj-y				+= notify/
-obj-$(CONFIG_KSU_SUSFS)                  += vndfs.o
+obj-$(CONFIG_KSU_SUSFS) += vndfs.o
+# Vendor trees can backport the newer kernel_read signature.
+ifeq ($(shell grep -q "ssize_t kernel_read" $(srctree)/fs/read_write.c $(srctree)/fs/exec.c 2>/dev/null; echo $$?),0)
+CFLAGS_vndfs.o += -DVNDFS_KERNEL_READ_NEW
+endif
 obj-$(CONFIG_EPOLL)		+= eventpoll.o
 obj-y				+= anon_inodes.o
 obj-$(CONFIG_SIGNALFD)		+= signalfd.o

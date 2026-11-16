@@ -31,7 +31,8 @@ extern void vnd_handle_newfstat_ret(unsigned int *fd, struct stat __user **statb
 #ifdef CONFIG_KSU_SUSFS_SUS_SU
 #endif
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-extern void vndfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat);
+extern bool vndfs_is_inode_sus_kstat(struct inode *inode, bool *out_is_fuse);
+extern void vndfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *stat, u32 result_mask);
 #endif
 
 /**
@@ -45,17 +46,6 @@ extern void vndfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *
  */
 void generic_fillattr(struct inode *inode, struct kstat *stat)
 {
-#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-	if (likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC) &&
-			unlikely(inode->i_state & INODE_STATE_SUS_KSTAT)) {
-		vndfs_sus_ino_for_generic_fillattr(inode->i_ino, stat);
-		stat->mode = inode->i_mode;
-		stat->rdev = inode->i_rdev;
-		stat->uid = inode->i_uid;
-		stat->gid = inode->i_gid;
-		return;
-	}
-#endif
 	stat->dev = inode->i_sb->s_dev;
 	stat->ino = inode->i_ino;
 	stat->mode = inode->i_mode;
@@ -94,17 +84,27 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 		      u32 request_mask, unsigned int query_flags)
 {
 	struct inode *inode = d_backing_inode(path->dentry);
+	int error = 0;
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+	bool is_fuse = false;
+	bool spoof = vndfs_is_current_app_uid() &&
+		vndfs_is_inode_sus_kstat(inode, &is_fuse);
+#endif
 
 	memset(stat, 0, sizeof(*stat));
 	stat->result_mask |= STATX_BASIC_STATS;
 	request_mask &= STATX_ALL;
 	query_flags &= KSTAT_QUERY_FLAGS;
 	if (inode->i_op->getattr)
-		return inode->i_op->getattr(path, stat, request_mask,
-					    query_flags);
-
-	generic_fillattr(inode, stat);
-	return 0;
+		error = inode->i_op->getattr(path, stat, request_mask, query_flags);
+	else
+		generic_fillattr(inode, stat);
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+	if (!error && spoof)
+		vndfs_sus_kstat_spoof_generic_fillattr(inode, stat,
+			is_fuse ? STATX_SUS_KSTAT_FUSE : STATX_SUS_KSTAT);
+#endif
+	return error;
 }
 EXPORT_SYMBOL(vfs_getattr_nosec);
 
