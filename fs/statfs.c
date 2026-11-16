@@ -9,10 +9,10 @@
 #include <linux/security.h>
 #include <linux/uaccess.h>
 #include <linux/compat.h>
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+#ifdef CONFIG_KSU_SUSFS
 #include <linux/vndfs_def.h>
 #include "mount.h"
-#endif
+#endif // #if defined(CONFIG_KSU_SUSFS_SUS_MOUNT) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
 #include "internal.h"
 
 static int flags_by_mnt(int mnt_flags)
@@ -71,26 +71,90 @@ static int statfs_by_dentry(struct dentry *dentry, struct kstatfs *buf)
 	return retval;
 }
 
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+extern bool vndfs_is_inode_sus_kstat(struct inode *inode, bool *out_is_fuse);
+extern int vndfs_sus_kstat_spoof_vfs_statfs(struct inode *inode, struct kstatfs *buf, bool *is_fuse);
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+extern struct vfsmount *vndfs_get_non_sus_vfsmnt_from_vfsmnt(struct vfsmount *vfsmnt);
+#endif //#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+int statfs_by_dentry_wrapper(struct dentry *dentry, struct kstatfs *buf){
+	return statfs_by_dentry(dentry, buf);
+}
+
+int calculate_f_flags_wrapper(struct vfsmount *mnt)
+{
+	return calculate_f_flags(mnt);
+}
+
+static int vndfs_statfs_by_dentry(struct dentry *dentry, struct vfsmount *mnt, struct kstatfs *buf, bool *is_fuse)
+{
+	int retval;
+
+	if (!dentry->d_sb->s_op->statfs)
+		return -ENOSYS;
+
+	memset(buf, 0, sizeof(*buf));
+	retval = security_sb_statfs(dentry);
+	if (retval)
+		return retval;
+	if (!vndfs_sus_kstat_spoof_vfs_statfs(d_backing_inode(dentry), buf, is_fuse)) {
+		if (buf->f_frsize == 0)
+			buf->f_frsize = buf->f_bsize;
+		return retval;
+	}
+	retval = dentry->d_sb->s_op->statfs(dentry, buf);
+	if (retval == 0) {
+		buf->f_flags = calculate_f_flags(mnt);
+		if (buf->f_frsize == 0)
+			buf->f_frsize = buf->f_bsize;
+	}
+	return retval;
+}
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+
 int vfs_statfs(const struct path *path, struct kstatfs *buf)
 {
 	int error;
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-	struct mount *mnt;
-
-	mnt = real_mount(path->mnt);
-	if (likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC)) {
-		for (; mnt->mnt_id >= DEFAULT_SUS_MNT_ID; mnt = mnt->mnt_parent) {}
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+	if (vndfs_is_current_app_uid()) {
+		struct inode *inode = d_backing_inode(path->dentry);
+		bool is_fuse = false;
+		if (vndfs_is_inode_sus_kstat(inode, &is_fuse)) {
+			// - here we do not call calculate_f_flags() here as buf->f_flags on the
+			//   sus_kstat path will be handled by vndfs_statfs_by_dentry().
+			return vndfs_statfs_by_dentry(path->dentry, path->mnt, buf, &is_fuse);
+		}
 	}
-	error = statfs_by_dentry(mnt->mnt.mnt_root, buf);
-	if (!error)
-		buf->f_flags = calculate_f_flags(&mnt->mnt);
-	return error;
-#else
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+	if (likely(vndfs_is_current_proc_umounted())) {
+		struct vfsmount *no_sus_vfsmnt = NULL;
+		no_sus_vfsmnt = vndfs_get_non_sus_vfsmnt_from_vfsmnt(path->mnt);
+		if (path->mnt == no_sus_vfsmnt) {
+			dput(no_sus_vfsmnt->mnt_root);
+			mntput(no_sus_vfsmnt);
+			error = statfs_by_dentry(path->dentry, buf);
+			if (!error)
+				buf->f_flags = calculate_f_flags(path->mnt);
+			return error;
+	}
+		error = statfs_by_dentry(no_sus_vfsmnt->mnt_root, buf);
+		if (!error)
+			buf->f_flags = calculate_f_flags(no_sus_vfsmnt);
+		dput(no_sus_vfsmnt->mnt_root);
+		mntput(no_sus_vfsmnt);
+		return error;
+	}
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+
 	error = statfs_by_dentry(path->dentry, buf);
 	if (!error)
 		buf->f_flags = calculate_f_flags(path->mnt);
 	return error;
-#endif
 }
 EXPORT_SYMBOL(vfs_statfs);
 
@@ -120,7 +184,7 @@ retry:
 	 * - Anyway we just cannot use the retrieved f_flags from ovl_getattr() of overlayfs,
 	 *   we need to run one more check for user_statfs() and fd_statfs() by ourselves.
 	 */
-	if (unlikely((st->f_flags & ST_RDONLY) && (st->f_flags & ST_RELATIME))) {
+	if (!error && unlikely((st->f_flags & ST_RDONLY) && (st->f_flags & ST_RELATIME))) {
 		st->f_flags &= ~ST_RELATIME;
 		st->f_flags |= ST_NOATIME;
 	}
@@ -137,7 +201,7 @@ int fd_statfs(int fd, struct kstatfs *st)
 		fdput(f);
 	}
 #ifdef CONFIG_KSU_SUSFS_SUS_OVERLAYFS
-	if (unlikely((st->f_flags & ST_RDONLY) && (st->f_flags & ST_RELATIME))) {
+	if (!error && unlikely((st->f_flags & ST_RDONLY) && (st->f_flags & ST_RELATIME))) {
 		st->f_flags &= ~ST_RELATIME;
 		st->f_flags |= ST_NOATIME;
 	}
@@ -262,11 +326,6 @@ static int vfs_ustat(dev_t dev, struct kstatfs *sbuf)
 	if (!s)
 		return -EINVAL;
 
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-	if (unlikely(s->s_root->d_inode->i_state & INODE_STATE_SUS_MOUNT)) {
-		return -EINVAL;
-	}
-#endif
 	err = statfs_by_dentry(s->s_root, sbuf);
 	drop_super(s);
 	return err;

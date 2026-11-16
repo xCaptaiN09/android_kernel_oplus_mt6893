@@ -39,12 +39,13 @@ struct hashtab *hashtab_create(u32 (*hash_value)(struct hashtab *h, const void *
 	return p;
 }
 
-int hashtab_insert(struct hashtab *h, void *key, void *datum)
+int hashtab_insert_gfp(struct hashtab *h, void *key, void *datum, gfp_t gfp)
 {
 	u32 hvalue;
 	struct hashtab_node *prev, *cur, *newnode;
 
-	cond_resched();
+	if (gfpflags_allow_blocking(gfp))
+		cond_resched();
 
 	if (!h || h->nel == HASHTAB_MAX_NODES)
 		return -EINVAL;
@@ -60,7 +61,7 @@ int hashtab_insert(struct hashtab *h, void *key, void *datum)
 	if (cur && (h->keycmp(h, key, cur->key) == 0))
 		return -EEXIST;
 
-	newnode = kmem_cache_zalloc(hashtab_node_cachep, GFP_KERNEL);
+	newnode = kmem_cache_zalloc(hashtab_node_cachep, gfp);
 	if (!newnode)
 		return -ENOMEM;
 	newnode->key = key;
@@ -75,6 +76,11 @@ int hashtab_insert(struct hashtab *h, void *key, void *datum)
 
 	h->nel++;
 	return 0;
+}
+
+int hashtab_insert(struct hashtab *h, void *key, void *datum)
+{
+	return hashtab_insert_gfp(h, key, datum, GFP_KERNEL);
 }
 
 void *hashtab_search(struct hashtab *h, const void *key)

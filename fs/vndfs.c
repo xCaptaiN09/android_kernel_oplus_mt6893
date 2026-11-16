@@ -21,13 +21,53 @@
 #include <linux/fsnotify_backend.h>
 #include <linux/jump_label.h>
 #include <linux/version.h> // We need check kernel version.
+#include <linux/security.h>
+#include <linux/bitmap.h>
+#include <linux/limits.h>
+#include <linux/rcupdate.h>
+#include <linux/string.h>
+#include <linux/vmalloc.h>
+#include <linux/mm.h>
+#include <linux/hash.h>
 #include <linux/vndfs.h>
 #include "fuse/fuse_i.h"
 #include "mount.h"
 
+#ifdef VNDFS_KERNEL_READ_NEW
+static inline int vndfs_kernel_read(struct file *fp, void *buf, size_t size, loff_t *pos)
+{
+	return kernel_read(fp, buf, size, pos);
+}
+#else
+static inline int vndfs_kernel_read(struct file *fp, void *buf, size_t size, loff_t *pos)
+{
+	return kernel_read(fp, *pos, buf, size);
+}
+#endif
+
 extern bool vndfs_is_current_ksu_domain(void);
 extern void setup_selinux(const char *domain, struct cred *cred);
 extern struct cred *ksu_cred;
+extern int vndfs_get_non_sus_mnt_id_from_mnt(struct mount *orig_mnt);
+extern struct vfsmount *vndfs_get_non_sus_vfsmnt_from_vfsmnt(struct vfsmount *vfsmnt);
+
+/*
+ * kvmalloc() was introduced in v4.12. 4.4 / 4.9 do not have it, but they do
+ * have kvfree(), so only kvmalloc() needs a fallback here.
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
+static inline void *vndfs_kvmalloc(size_t size, gfp_t flags)
+{
+	void *p;
+
+	p = kmalloc(size, flags);
+	if (!p)
+		p = vmalloc(size);
+	if (p && (flags & __GFP_ZERO))
+		memset(p, 0, size);
+	return p;
+}
+#endif
 
 #ifdef CONFIG_KSU_SUSFS_SUS_SU
 bool vndfs_is_sus_su_hooks_enabled __read_mostly;
@@ -37,12 +77,65 @@ extern void ksu_vndfs_disable_sus_su(void);
 
 #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
 DEFINE_STATIC_KEY_TRUE(vndfs_is_log_enabled);
-#define VNDFS_LOGI(fmt, ...) if (static_branch_likely(&vndfs_is_log_enabled)) pr_info("susfs:[%u][%d][%s] " fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
-#define VNDFS_LOGE(fmt, ...) if (static_branch_likely(&vndfs_is_log_enabled)) pr_err("susfs:[%u][%d][%s]" fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
+#define VNDFS_LOGI(fmt, ...) if (static_branch_likely(&vndfs_is_log_enabled)) pr_info("vndfs:[%u][%d][%s] " fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
+#define VNDFS_LOGE(fmt, ...) if (static_branch_likely(&vndfs_is_log_enabled)) pr_err("vndfs:[%u][%d][%s]" fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
+#define VNDFS_LOGI_RL(fmt, ...) if (static_branch_likely(&vndfs_is_log_enabled)) pr_info_ratelimited("vndfs:[%u][%d][%s] " fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
+#define VNDFS_LOGE_RL(fmt, ...) if (static_branch_likely(&vndfs_is_log_enabled)) pr_err_ratelimited("vndfs:[%u][%d][%s]" fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
 #else
 #define VNDFS_LOGI(fmt, ...)
 #define VNDFS_LOGE(fmt, ...)
+#define VNDFS_LOGI_RL(fmt, ...)
+#define VNDFS_LOGE_RL(fmt, ...)
 #endif
+
+/*
+ * Switches the selinux domain of the current process to the KernelSU one, so
+ * that the data paths of the apps can be accessed despite of the selinux
+ * restrictions.
+ * The original credentials are returned, they have to be restored with
+ * vndfs_restore_creds() afterwards.
+ * Returns the original credentials on success, NULL on failure.
+ */
+static struct cred *vndfs_switch_to_ksu_domain(void) {
+	struct cred *orig_cred = NULL;
+	struct cred *cred = NULL;
+
+	/* a copy of the current credentials, which is restored later on */
+	orig_cred = prepare_creds();
+	if (!orig_cred) {
+		VNDFS_LOGE("failed to prepare creds!\n");
+		return NULL;
+	}
+
+	cred = prepare_creds();
+	if (!cred) {
+		VNDFS_LOGE("failed to prepare creds!\n");
+		abort_creds(orig_cred);
+		return NULL;
+	}
+
+	setup_selinux("u:r:ksu:s0", cred);
+	commit_creds(cred);
+
+	if (!vndfs_is_current_ksu_domain()) {
+		VNDFS_LOGE("domain is not ksu, restoring the original creds\n");
+		commit_creds(orig_cred);
+		return NULL;
+	}
+
+	return orig_cred;
+}
+
+/*
+ * Restores the original credentials that were saved by
+ * vndfs_switch_to_ksu_domain().
+ */
+static void vndfs_restore_creds(struct cred *orig_cred) {
+	if (!orig_cred)
+		return;
+
+	commit_creds(orig_cred);
+}
 
 /* sus_path */
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
@@ -59,6 +152,11 @@ void vndfs_add_sus_path(void __user **user_info) {
 
 	if (copy_from_user(&info, (struct st_vndfs_sus_path __user*)*user_info, sizeof(info))) {
 		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	if (!memchr(info.target_pathname, '\0', sizeof(info.target_pathname))) {
+		info.err = -EINVAL;
 		goto out_copy_to_user;
 	}
 
@@ -109,6 +207,11 @@ void vndfs_add_sus_path_loop(void __user **user_info) {
 
 	if (copy_from_user(&info, (struct st_vndfs_sus_path __user*)*user_info, sizeof(info))) {
 		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	if (!memchr(info.target_pathname, '\0', sizeof(info.target_pathname))) {
+		info.err = -EINVAL;
 		goto out_copy_to_user;
 	}
 
@@ -178,68 +281,500 @@ void vndfs_run_sus_path_loop(void) {
 	revert_creds(saved);
 }
 
-static inline bool is_i_uid_not_allowed(uid_t i_uid) {
-	return likely(current_uid().val != i_uid);
-}
 
-/* - Please note that path inside /sdcard will be still visible to MediaProvider module,
- *   since the uid of path like /sdcard/TWRP will be the uid of your MediaProvider module.
- */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-bool vndfs_is_inode_sus_path(struct mnt_idmap* idmap, struct inode *inode)
-#else
-bool vndfs_is_inode_sus_path(struct inode *inode)
-#endif
+bool vndfs_is_uid_allowed_for_sus_path(uid_t uid);
+
+__attribute__((hot)) bool vndfs_is_inode_sus_path(struct inode *inode)
 {
+	uid_t uid = current_uid().val % 100000;
 	struct fuse_inode *fi = NULL;
-	if (!vndfs_is_current_proc_umounted_app()) {
+
+	if (uid < 10000) {
 		return false;
 	}
-	if (!inode->i_mapping) {
+
+	if (!inode || !inode->i_mapping) {
 		VNDFS_LOGE("inode->i_mapping is NULL\n");
 		return false;
 	}
+
 	if (inode->i_sb->s_magic == FUSE_SUPER_MAGIC) {
 		fi = get_fuse_inode(inode);
 		if (!fi || !fi->inode.i_mapping) {
 			VNDFS_LOGE("fi || fi->inode.i_mapping is NULL\n");
 			return false;
 		}
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+
 		if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &fi->inode.i_state) &&
-			is_i_uid_not_allowed(i_uid_into_vfsuid(idmap, &fi->inode).val)))
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
-		if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &fi->inode.i_state) &&
-			is_i_uid_not_allowed(i_uid_into_mnt(i_user_ns(&fi->inode), &fi->inode).val)))
-#else
-		if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &fi->inode.i_state) &&
-			is_i_uid_not_allowed(fi->inode.i_uid.val)))
-#endif
+			likely(!vndfs_is_uid_allowed_for_sus_path(uid))))
 		{
-			VNDFS_LOGI("hiding path with ino '%lu'\n", inode->i_ino);
+			//VNDFS_LOGI("hiding path with ino '%lu'\n", inode->i_ino);
 			return true;
 		}
 		return false;
 	}
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+
 	if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &inode->i_state) &&
-		is_i_uid_not_allowed(i_uid_into_vfsuid(idmap, inode).val)))
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
-	if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &inode->i_state) &&
-		is_i_uid_not_allowed(i_uid_into_mnt(i_user_ns(inode), inode).val)))
-#else
-	if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &inode->i_state) &&
-		is_i_uid_not_allowed(inode->i_uid.val)))
-#endif
+		likely(!vndfs_is_uid_allowed_for_sus_path(uid))))
 	{
-		VNDFS_LOGI("hiding path with ino '%lu'\n", inode->i_ino);
+		//VNDFS_LOGI("hiding path with ino '%lu'\n", inode->i_ino);
 		return true;
 	}
+
 	return false;
 }
 
-int vndfs_get_data_path(struct path *path) {
-	return kern_path("/data", LOOKUP_FOLLOW, path);
+/*****************************************/
+/* sus_path uid filter (bitmap)          */
+/*****************************************/
+/* The uids of the apps that are denied to see the added sus paths.
+ * Other uids within the app uid range (10000 - 19999) are still able
+ * to see all added sus paths.
+ * Effective only on process with uid >= 10000
+ */
+struct vndfs_sus_path_uid_filter_bitmap {
+	struct rcu_head                 rcu;
+	unsigned long                   bits[VNDFS_UID_FILTER_BITMAP_LEN];
+};
+
+static struct vndfs_sus_path_uid_filter_bitmap __rcu *sus_path_uid_filter_bitmap;
+static DEFINE_MUTEX(vndfs_mutex_lock_sus_path_uid_filter);
+static unsigned long sus_path_uid_filter_generation;
+/*
+ * The app package names of the apps that are currently allowed to see
+ * the added sus paths. They are stored so that the uids of the apps can
+ * be resolved again whenever the apps are installed or uninstalled,
+ * because the uid of an app changes when the app is reinstalled.
+ * Protected by vndfs_mutex_lock_sus_path_uid_filter.
+ */
+static char *vndfs_sus_path_app_strings = NULL;
+/* Ensures that there is only one resolving thread running at the same time */
+static atomic_t vndfs_sus_path_app_strings_running = ATOMIC_INIT(0);
+
+/*
+ * Checks whether the given string is a valid app package name.
+ * Returns true if it is a valid app package name.
+ */
+static bool vndfs_is_valid_sus_path_app_name(const char *app_name) {
+	const char *p = app_name;
+	size_t len = strlen(app_name);
+
+	if (len == 0 || len > 255)
+		return false;
+
+	/* reject the relative paths to prevent any path traversal */
+	if (!strcmp(app_name, ".") || !strcmp(app_name, ".."))
+		return false;
+
+	for (; *p != '\0'; p++) {
+		if ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+			(*p >= '0' && *p <= '9') || *p == '.' || *p == '_')
+			continue;
+		return false;
+	}
+
+	return true;
+}
+
+/*
+ * Resolves the uid of the given app package name from /data/system/packages.list.
+ * Returns 0 on success, a negative errno on failure.
+ */
+static int vndfs_resolve_sus_path_app_uid(const char *app_name, uid_t *uid) {
+	struct file *fp;
+	char *buf = NULL;
+	char *line, *tmp, *p;
+	char *pkg_name, *uid_str;
+	loff_t pos = 0;
+	size_t size;
+	unsigned long val;
+	int ret = -ENOENT;
+
+	if (!app_name || !*app_name || !uid)
+		return -EINVAL;
+
+	if (!vndfs_is_valid_sus_path_app_name(app_name))
+		return -EINVAL;
+
+	fp = filp_open("/data/system/packages.list", O_RDONLY | O_NOATIME, 0);
+	if (IS_ERR(fp)) {
+		ret = PTR_ERR(fp);
+		VNDFS_LOGE("failed to open /data/system/packages.list: %d\n", ret);
+		return ret;
+	}
+
+	size = i_size_read(file_inode(fp));
+	if (size <= 0 || size > (4 * 1024 * 1024)) {
+		filp_close(fp, NULL);
+		return -EFBIG;
+	}
+
+	buf = vmalloc(size + 1);
+	if (!buf) {
+		filp_close(fp, NULL);
+		return -ENOMEM;
+	}
+	buf[size] = '\0';
+
+	ret = vndfs_kernel_read(fp, buf, size, &pos);
+	filp_close(fp, NULL);
+	if (ret != (int)size) {
+		vfree(buf);
+		return -EIO;
+	}
+
+	line = buf;
+	while (line && *line) {
+		p = strchr(line, '\n');
+		if (p) {
+			*p = '\0';
+			tmp = p + 1;
+		} else {
+			tmp = NULL;
+		}
+
+		/* skip empty lines */
+		if (*line == '\0' || *line == '\r') {
+			line = tmp;
+			continue;
+		}
+
+		/* packages.list format: <package> <uid> <gid> ... */
+		pkg_name = strsep(&line, " \t");
+		if (!pkg_name || *pkg_name == '\0') {
+			line = tmp;
+			continue;
+		}
+
+		uid_str = strsep(&line, " \t");
+		if (!uid_str || *uid_str == '\0') {
+			line = tmp;
+			continue;
+		}
+
+		if (!strcmp(pkg_name, app_name)) {
+			if (kstrtoul(uid_str, 10, &val)) {
+				vfree(buf);
+				return -EINVAL;
+			}
+
+			if (val > (uid_t)-1) {
+				vfree(buf);
+				return -ERANGE;
+			}
+			*uid = val % 100000;
+
+			vfree(buf);
+
+			if (*uid < VNDFS_UID_FILTER_MIN_UID ||
+				*uid > VNDFS_UID_FILTER_MAX_UID)
+				return -EINVAL;
+
+			return 0;
+		}
+
+		line = tmp;
+	}
+
+	vfree(buf);
+	return -ENOENT;
+}
+
+/*
+ * Parses the comma separated list of the app package names, resolves the uid
+ * of every app and maps the uids into the given bitmap.
+ *
+ * The spaces before and after the commas are ignored.
+ * The given string is modified while it is being parsed.
+ * If 'skip_failed' is true, the apps whose data path cannot be found are
+ * skipped (they are uninstalled already), otherwise an error is returned.
+ * Returns 0 on success, a negative errno on failure.
+ */
+static int vndfs_parse_sus_path_app_names(char *app_str, unsigned long *bits, bool skip_failed) {
+	char *token = NULL;
+	char *saveptr = app_str;
+	uid_t uid = 0;
+	int ret;
+
+	while ((token = strsep(&saveptr, ",")) != NULL) {
+		token = strim(token);
+		if (*token == '\0') {
+			/* tolerate the empty items, e.g., "com.foo,,com.bar" */
+			continue;
+		}
+
+		if (!vndfs_is_valid_sus_path_app_name(token)) {
+			VNDFS_LOGE("invalid app name '%s'\n", token);
+			return -EINVAL;
+		}
+
+		ret = vndfs_resolve_sus_path_app_uid(token, &uid);
+		if (ret) {
+			if (skip_failed)
+				continue;
+			return ret;
+		}
+
+		if (uid < VNDFS_UID_FILTER_MIN_UID || uid > VNDFS_UID_FILTER_MAX_UID) {
+			VNDFS_LOGE("the uid %u of the app '%s' is out of the allowed range [%d, %d]\n",
+						uid, token, VNDFS_UID_FILTER_MIN_UID,
+						VNDFS_UID_FILTER_MAX_UID);
+			if (!skip_failed)
+				return -EINVAL;
+			continue;
+		}
+
+		set_bit(uid - VNDFS_UID_FILTER_MIN_UID, bits);
+		VNDFS_LOGI("app_name '%s', uid '%u' is now added to sus_path_uid_filter_bitmap\n", token, uid);
+	}
+
+	return 0;
+}
+
+void vndfs_set_sus_path_uid_filter(void __user **user_info) {
+	struct st_vndfs_sus_path_uid_filter *info = NULL;
+	struct vndfs_sus_path_uid_filter_bitmap *new_bitmap = NULL;
+	struct vndfs_sus_path_uid_filter_bitmap *old_bitmap = NULL;
+	char *new_app_strings = NULL;
+	struct cred *orig_cred = NULL;
+	size_t app_str_len = 0;
+	int err = 0;
+	static bool is_uid_filter_set_before = false;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
+	info = vndfs_kvmalloc(sizeof(*info), GFP_KERNEL | __GFP_ZERO);
+#else
+	info = kvmalloc(sizeof(*info), GFP_KERNEL | __GFP_ZERO);
+#endif
+	if (!info) {
+		err = -ENOMEM;
+		goto out_copy_to_user;
+	}
+
+	if (copy_from_user(info, (struct st_vndfs_sus_path_uid_filter __user*)*user_info, sizeof(*info))) {
+		err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	/* the app names string must be null terminated within the buffer */
+	if (!memchr(info->app_strings, '\0', sizeof(info->app_strings))) {
+		VNDFS_LOGE("the app names string is not null terminated\n");
+		err = -EINVAL;
+		goto out_copy_to_user;
+	}
+
+	if (*info->app_strings == '\0') {
+		VNDFS_LOGE("the app names string cannot be empty\n");
+		err = -EINVAL;
+		goto out_copy_to_user;
+	}
+
+	app_str_len = strlen(info->app_strings);
+
+	/*
+	* The app names are stored as they are, so that the uids of the apps can
+	* be resolved again later on, when the apps are installed or uninstalled.
+	*/
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
+	new_app_strings = vndfs_kvmalloc(app_str_len + 1, GFP_KERNEL | __GFP_ZERO);
+#else
+	new_app_strings = kvmalloc(app_str_len + 1, GFP_KERNEL | __GFP_ZERO);
+#endif
+	if (!new_app_strings) {
+		err = -ENOMEM;
+		goto out_copy_to_user;
+	}
+	memcpy(new_app_strings, info->app_strings, app_str_len + 1);
+
+	new_bitmap = (struct vndfs_sus_path_uid_filter_bitmap *)kzalloc(sizeof(*new_bitmap), GFP_KERNEL);
+	if (!new_bitmap) {
+		err = -ENOMEM;
+		goto out_free_new_app_strings;
+	}
+
+	/*
+	* The data paths of the apps cannot be accessed with the selinux
+	* restrictions of the calling process, hence the selinux domain is
+	* switched to the KernelSU one before the uids are resolved.
+	*/
+	orig_cred = vndfs_switch_to_ksu_domain();
+	if (!orig_cred) {
+		err = -EINVAL;
+		goto out_free_new_bitmap;
+	}
+
+	if (is_uid_filter_set_before)
+		VNDFS_LOGI("renewing the sus path uid filter\n");
+	err = vndfs_parse_sus_path_app_names(info->app_strings, new_bitmap->bits, true);
+
+	vndfs_restore_creds(orig_cred);
+	orig_cred = NULL;
+
+	if (err)
+		goto out_free_new_bitmap;
+
+	/*
+	* Publish the new bitmap and drop the old one.
+	* The mutex serializes the writers, while the readers are protected
+	* by RCU, hence the readers always see a consistent bitmap and they
+	* never access a freed bitmap.
+	*/
+	mutex_lock(&vndfs_mutex_lock_sus_path_uid_filter);
+	old_bitmap = rcu_dereference_protected(sus_path_uid_filter_bitmap, lockdep_is_held(&vndfs_mutex_lock_sus_path_uid_filter));
+	rcu_assign_pointer(sus_path_uid_filter_bitmap, new_bitmap);
+	new_bitmap = NULL;
+	kvfree(vndfs_sus_path_app_strings);
+	vndfs_sus_path_app_strings = new_app_strings;
+	sus_path_uid_filter_generation++;
+	new_app_strings = NULL;
+	if (!is_uid_filter_set_before)
+		is_uid_filter_set_before = true;
+	mutex_unlock(&vndfs_mutex_lock_sus_path_uid_filter);
+	synchronize_rcu();
+	if (old_bitmap)
+		kfree_rcu(old_bitmap, rcu);
+
+	VNDFS_LOGI("the sus path uid filter is set\n");
+	err = 0;
+
+out_free_new_bitmap:
+	if (new_bitmap)
+		kfree(new_bitmap);
+out_free_new_app_strings:
+	if (new_app_strings)
+		kvfree(new_app_strings);
+out_copy_to_user:
+	if (copy_to_user(&((struct st_vndfs_sus_path_uid_filter __user*)*user_info)->err, &err, sizeof(err))) {
+		err = -EFAULT;
+	}
+	VNDFS_LOGI("CMD_VNDFS_SET_SUS_PATH_UID_FILTER -> ret: %d\n", err);
+	if (info)
+		kvfree(info);
+}
+
+/*
+ * The thread that resolves the uids of the stored app package names again,
+ * so that the filter stays up to date when the apps are installed or
+ * uninstalled, because the uid of an app changes when it is reinstalled.
+ */
+static int vndfs_sus_path_app_strings_worker(void *data) {
+	struct vndfs_sus_path_uid_filter_bitmap *new_bitmap = NULL;
+	struct vndfs_sus_path_uid_filter_bitmap *old_bitmap = NULL;
+	struct cred *orig_cred = NULL;
+	char *app_strings = NULL;
+	size_t app_str_len = 0;
+	int ret = 0;
+	unsigned long generation;
+
+	/*
+	* The data paths of the apps cannot be accessed with the selinux
+	* restrictions of the default domain of the thread, hence the selinux
+	* domain is switched to the KernelSU one.
+	*/
+	orig_cred = vndfs_switch_to_ksu_domain();
+	if (!orig_cred)
+		goto out;
+
+	/* take a snapshot of the stored app package names */
+	mutex_lock(&vndfs_mutex_lock_sus_path_uid_filter);
+	generation = sus_path_uid_filter_generation;
+	if (vndfs_sus_path_app_strings) {
+		app_str_len = strlen(vndfs_sus_path_app_strings);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
+		app_strings = vndfs_kvmalloc(app_str_len + 1, GFP_KERNEL | __GFP_ZERO);
+#else
+		app_strings = kvmalloc(app_str_len + 1, GFP_KERNEL | __GFP_ZERO);
+#endif
+		if (app_strings)
+			memcpy(app_strings, vndfs_sus_path_app_strings, app_str_len + 1);
+	}
+	mutex_unlock(&vndfs_mutex_lock_sus_path_uid_filter);
+
+	if (!app_strings)
+		goto out_restore_creds;
+
+	new_bitmap = (struct vndfs_sus_path_uid_filter_bitmap *)kzalloc(sizeof(*new_bitmap), GFP_KERNEL);
+	if (!new_bitmap)
+		goto out_restore_creds;
+
+	/* the apps that are uninstalled already are skipped */
+	ret = vndfs_parse_sus_path_app_names(app_strings, new_bitmap->bits, true);
+	if (ret)
+		goto out_restore_creds;
+
+	/*
+	* The old bitmap is zeroed and the newly resolved uids are mapped into
+	* the new one, which is then published to the readers.
+	*/
+	mutex_lock(&vndfs_mutex_lock_sus_path_uid_filter);
+	if (generation != sus_path_uid_filter_generation) {
+		mutex_unlock(&vndfs_mutex_lock_sus_path_uid_filter);
+		goto out_restore_creds;
+	}
+	old_bitmap = rcu_dereference_protected(sus_path_uid_filter_bitmap, lockdep_is_held(&vndfs_mutex_lock_sus_path_uid_filter));
+	rcu_assign_pointer(sus_path_uid_filter_bitmap, new_bitmap);
+	new_bitmap = NULL;
+	mutex_unlock(&vndfs_mutex_lock_sus_path_uid_filter);
+	synchronize_rcu();
+	if (old_bitmap)
+		kfree_rcu(old_bitmap, rcu);
+
+	VNDFS_LOGI("the uids of the sus path uid filter are resolved again\n");
+
+out_restore_creds:
+	vndfs_restore_creds(orig_cred);
+	orig_cred = NULL;
+out:
+	if (new_bitmap)
+		kfree(new_bitmap);
+	if (app_strings)
+		kvfree(app_strings);
+	atomic_set(&vndfs_sus_path_app_strings_running, 0);
+
+	return ret;
+}
+
+/*
+ * Resolves the uids of the stored app package names again in a new thread,
+ * because the resolving of the uids requires the KernelSU selinux domain,
+ * which must not be applied to the calling process.
+ */
+void vndfs_parse_sus_path_app_strings(void) {
+	/* do not spawn a new thread if there is already one running */
+	if (atomic_cmpxchg(&vndfs_sus_path_app_strings_running, 0, 1))
+		return;
+
+	if (IS_ERR(kthread_run(vndfs_sus_path_app_strings_worker, NULL, "vndfs_spuid_appstr"))) {
+		atomic_set(&vndfs_sus_path_app_strings_running, 0);
+		VNDFS_LOGE("failed to create the thread vndfs_sus_path_app_strings\n");
+	}
+}
+
+/*
+ * Lockless lookup for the sus_path hiding path.
+ * Returns true if the uid is denied to see the added sus paths by the sus path uid filter.
+ */
+bool vndfs_is_uid_allowed_for_sus_path(uid_t uid) {
+	struct vndfs_sus_path_uid_filter_bitmap *bitmap;
+
+	if (uid >= 90000)
+		return true;
+
+	if (uid < VNDFS_UID_FILTER_MIN_UID ||
+		uid > VNDFS_UID_FILTER_MAX_UID)
+		return false;
+
+	rcu_read_lock();
+	bitmap = rcu_dereference(sus_path_uid_filter_bitmap);
+	if (likely(bitmap)) {
+		if (test_bit(uid - VNDFS_UID_FILTER_MIN_UID, bitmap->bits)) {
+			rcu_read_unlock();
+			return true;
+		}
+	}
+
+	rcu_read_unlock();
+	return false;
 }
 
 int vndfs_sus_ino_for_filldir64(unsigned long ino)
@@ -316,12 +851,16 @@ out_copy_to_user:
 /* sus_kstat */
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 static DEFINE_MUTEX(vndfs_mutex_lock_sus_kstat);
-static DEFINE_HASHTABLE(SUS_KSTAT_HLIST, 10);
+static DEFINE_HASHTABLE(SUS_KSTAT_HLIST, 14);
 
-static int vndfs_mark_inode_sus_kstat(char *target_pathname, struct st_vndfs_sus_kstat_hlist *new_entry) {
+extern int calculate_f_flags_wrapper(struct vfsmount *mnt);
+extern int statfs_by_dentry_wrapper(struct dentry *dentry, struct kstatfs *buf);
+
+static int vndfs_mark_inode_sus_kstat(char *target_pathname, struct st_vndfs_sus_kstat_hlist *new_entry, bool is_update) {
 	struct path path;
 	struct inode *inode = NULL;
 	struct fuse_inode *fi = NULL;
+	struct vfsmount *no_sus_vfsmnt = NULL;
 	int err = 0;
 
 	err = kern_path(target_pathname, 0, &path);
@@ -344,24 +883,49 @@ static int vndfs_mark_inode_sus_kstat(char *target_pathname, struct st_vndfs_sus
 			err = -ENOENT;
 			goto out_path_put_path;
 		}
-		set_bit(AS_FLAGS_SUS_KSTAT, &fi->inode.i_state);
+		if (is_update)
+			new_entry->info.spoofed_size = d_backing_inode(path.dentry)->i_size;
+
 		new_entry->is_fuse = true;
 		new_entry->target_dev = fi->inode.i_sb->s_dev;
-		VNDFS_LOGI("flagged AS_FLAGS_SUS_KSTAT on pathname: '%s', is_fuse: %d, fi->inode.i_sb->s_dev: %u, fi->nodeid: %llu, fi->inode.i_ino: %lu, fi->inode.i_state: 0x%lx\n",
-					target_pathname, new_entry->is_fuse, fi->inode.i_sb->s_dev, fi->nodeid, fi->inode.i_ino, fi->inode.i_state);
-		err = 0;
+		new_entry->spoofed_mnt_id = vndfs_get_non_sus_mnt_id_from_mnt(real_mount(path.mnt));
+		no_sus_vfsmnt = vndfs_get_non_sus_vfsmnt_from_vfsmnt(path.mnt);
+		err = statfs_by_dentry_wrapper(no_sus_vfsmnt->mnt_root, &new_entry->spoofed_kstatfs);
+		if (!err)
+			new_entry->spoofed_kstatfs.f_flags = calculate_f_flags_wrapper(no_sus_vfsmnt);
+		dput(no_sus_vfsmnt->mnt_root);
+		mntput(no_sus_vfsmnt);
+		if (err)
+			goto out_path_put_path;
+
+		set_bit(AS_FLAGS_SUS_KSTAT, &fi->inode.i_state);
+		VNDFS_LOGI("marked AS_FLAGS_SUS_KSTAT on pathname: '%s', is_fuse: %d, fi->inode.i_sb->s_dev: %u, fi->nodeid: %llu, fi->inode.i_ino: %lu, fi->inode.i_state: 0x%lx, spoofed_mnt_id: '%d'\n",
+					target_pathname, new_entry->is_fuse, fi->inode.i_sb->s_dev, fi->nodeid, fi->inode.i_ino, fi->inode.i_state, new_entry->spoofed_mnt_id);
 		goto out_path_put_path;
 	}
 
-	set_bit(AS_FLAGS_SUS_KSTAT, &inode->i_state);
+	if (is_update)
+		new_entry->info.spoofed_size = d_backing_inode(path.dentry)->i_size;
+
 	new_entry->is_fuse = false;
 	new_entry->target_dev = inode->i_sb->s_dev;
-	VNDFS_LOGI("flagged AS_FLAGS_SUS_KSTAT on pathname: '%s', is_fuse: %d, inode->i_sb->s_dev: %u,  inode->i_ino: %lu, inode->i_state: 0x%lx\n",
-				target_pathname, new_entry->is_fuse, inode->i_sb->s_dev, inode->i_ino, inode->i_state);
+	new_entry->spoofed_mnt_id = vndfs_get_non_sus_mnt_id_from_mnt(real_mount(path.mnt));
+	no_sus_vfsmnt = vndfs_get_non_sus_vfsmnt_from_vfsmnt(path.mnt);
+	err = statfs_by_dentry_wrapper(no_sus_vfsmnt->mnt_root, &new_entry->spoofed_kstatfs);
+	if (!err)
+		new_entry->spoofed_kstatfs.f_flags = calculate_f_flags_wrapper(no_sus_vfsmnt);
+	dput(no_sus_vfsmnt->mnt_root);
+	mntput(no_sus_vfsmnt);
+	if (err)
+		goto out_path_put_path;
+
+	set_bit(AS_FLAGS_SUS_KSTAT, &inode->i_state);
+	VNDFS_LOGI("marked AS_FLAGS_SUS_KSTAT on pathname: '%s', is_fuse: %d, inode->i_sb->s_dev: %u,  inode->i_ino: %lu, inode->i_state: 0x%lx, spoofed_mnt_id: '%d'\n",
+				target_pathname, new_entry->is_fuse, inode->i_sb->s_dev, inode->i_ino, inode->i_state, new_entry->spoofed_mnt_id);
 
 out_path_put_path:
 	path_put(&path);
-	return 0;
+	return err;
 }
 
 void vndfs_add_sus_kstat(void __user **user_info) {
@@ -371,6 +935,11 @@ void vndfs_add_sus_kstat(void __user **user_info) {
 
 	if (copy_from_user(&info, (struct st_vndfs_sus_kstat __user*)*user_info, sizeof(info))) {
 		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	if (!memchr(info.target_pathname, '\0', sizeof(info.target_pathname))) {
+		info.err = -EINVAL;
 		goto out_copy_to_user;
 	}
 
@@ -386,11 +955,7 @@ void vndfs_add_sus_kstat(void __user **user_info) {
 	}
 
 #if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)
-#ifdef CONFIG_MIPS
-	info.spoofed_dev = new_decode_dev(info.spoofed_dev);
-#else
 	info.spoofed_dev = huge_decode_dev(info.spoofed_dev);
-#endif /* CONFIG_MIPS */
 #else
 	info.spoofed_dev = old_decode_dev(info.spoofed_dev);
 #endif /* defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64) */
@@ -402,30 +967,32 @@ void vndfs_add_sus_kstat(void __user **user_info) {
 	mutex_lock(&vndfs_mutex_lock_sus_kstat);
 	hash_for_each_possible_safe(SUS_KSTAT_HLIST, tmp_entry, tmp_hlist_node, node, info.target_ino) {
 		if (!strcmp(tmp_entry->info.target_pathname, info.target_pathname)) {
-			info.err = vndfs_mark_inode_sus_kstat(new_entry->info.target_pathname, new_entry);
+			info.err = vndfs_mark_inode_sus_kstat(new_entry->info.target_pathname, new_entry, false);
 			if (info.err) {
 				mutex_unlock(&vndfs_mutex_lock_sus_kstat);
 				kfree(new_entry);
 				goto out_copy_to_user;
 			}
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
-			VNDFS_LOGI("is_fuse: %d, is_statically: '%d', target_ino: '%lu', target_pathname: '%s', spoofed_ino: '%lu', spoofed_dev: '%lu', spoofed_nlink: '%u', spoofed_size: '%llu', spoofed_atime_tv_sec: '%ld', spoofed_mtime_tv_sec: '%ld', spoofed_ctime_tv_sec: '%ld', spoofed_atime_tv_nsec: '%ld', spoofed_mtime_tv_nsec: '%ld', spoofed_ctime_tv_nsec: '%ld', spoofed_blksize: '%lu', spoofed_blocks: '%llu', is successfully added to SUS_KSTAT_HLIST\n",
+			VNDFS_LOGI("is_fuse: %d, is_statically: '%d', target_ino: '%lu', target_dev: '%lu', target_pathname: '%s', spoofed_ino: '%lu', spoofed_dev: '%lu', spoofed_nlink: '%u', spoofed_size: '%llu', spoofed_atime_tv_sec: '%ld', spoofed_mtime_tv_sec: '%ld', spoofed_ctime_tv_sec: '%ld', spoofed_atime_tv_nsec: '%ld', spoofed_mtime_tv_nsec: '%ld', spoofed_ctime_tv_nsec: '%ld', spoofed_blksize: '%lu', spoofed_blocks: '%llu', spoofed_mnt_id: '%d', is successfully added to SUS_KSTAT_HLIST\n",
 					new_entry->is_fuse,
-					new_entry->info.is_statically, new_entry->info.target_ino, new_entry->info.target_pathname,
+					new_entry->info.is_statically, new_entry->info.target_ino,
+					new_entry->target_dev, new_entry->info.target_pathname,
 					new_entry->info.spoofed_ino, new_entry->info.spoofed_dev,
 					new_entry->info.spoofed_nlink, new_entry->info.spoofed_size,
 					new_entry->info.spoofed_atime_tv_sec, new_entry->info.spoofed_mtime_tv_sec, new_entry->info.spoofed_ctime_tv_sec,
 					new_entry->info.spoofed_atime_tv_nsec, new_entry->info.spoofed_mtime_tv_nsec, new_entry->info.spoofed_ctime_tv_nsec,
-					new_entry->info.spoofed_blksize, new_entry->info.spoofed_blocks);
+					new_entry->info.spoofed_blksize, new_entry->info.spoofed_blocks, new_entry->spoofed_mnt_id);
 #else
-			VNDFS_LOGI("is_fuse: %d, is_statically: '%d', target_ino: '%lu', target_pathname: '%s', spoofed_ino: '%lu', spoofed_dev: '%lu', spoofed_nlink: '%u', spoofed_size: '%u', spoofed_atime_tv_sec: '%ld', spoofed_mtime_tv_sec: '%ld', spoofed_ctime_tv_sec: '%ld', spoofed_atime_tv_nsec: '%ld', spoofed_mtime_tv_nsec: '%ld', spoofed_ctime_tv_nsec: '%ld', spoofed_blksize: '%lu', spoofed_blocks: '%llu', is successfully added to SUS_KSTAT_HLIST\n",
+			VNDFS_LOGI("is_fuse: %d, is_statically: '%d', target_ino: '%lu', target_dev: '%lu', target_pathname: '%s', spoofed_ino: '%lu', spoofed_dev: '%lu', spoofed_nlink: '%u', spoofed_size: '%u', spoofed_atime_tv_sec: '%ld', spoofed_mtime_tv_sec: '%ld', spoofed_ctime_tv_sec: '%ld', spoofed_atime_tv_nsec: '%ld', spoofed_mtime_tv_nsec: '%ld', spoofed_ctime_tv_nsec: '%ld', spoofed_blksize: '%lu', spoofed_blocks: '%llu', spoofed_mnt_id: '%d', is successfully added to SUS_KSTAT_HLIST\n",
 					new_entry->is_fuse,
-					new_entry->info.is_statically, new_entry->info.target_ino, new_entry->info.target_pathname,
+					new_entry->info.is_statically, new_entry->info.target_ino,
+					new_entry->target_dev, new_entry->info.target_pathname,
 					new_entry->info.spoofed_ino, new_entry->info.spoofed_dev,
 					new_entry->info.spoofed_nlink, new_entry->info.spoofed_size,
 					new_entry->info.spoofed_atime_tv_sec, new_entry->info.spoofed_mtime_tv_sec, new_entry->info.spoofed_ctime_tv_sec,
 					new_entry->info.spoofed_atime_tv_nsec, new_entry->info.spoofed_mtime_tv_nsec, new_entry->info.spoofed_ctime_tv_nsec,
-					new_entry->info.spoofed_blksize, new_entry->info.spoofed_blocks);
+					new_entry->info.spoofed_blksize, new_entry->info.spoofed_blocks, new_entry->spoofed_mnt_id);
 #endif
 			hash_del_rcu(&tmp_entry->node);
 			hash_add_rcu(SUS_KSTAT_HLIST, &new_entry->node, info.target_ino);
@@ -438,7 +1005,7 @@ void vndfs_add_sus_kstat(void __user **user_info) {
 	}
 
 	// if no duplicated, add it to list
-	info.err = vndfs_mark_inode_sus_kstat(new_entry->info.target_pathname, new_entry);
+	info.err = vndfs_mark_inode_sus_kstat(new_entry->info.target_pathname, new_entry, false);
 	if (info.err) {
 		mutex_unlock(&vndfs_mutex_lock_sus_kstat);
 		kfree(new_entry);
@@ -446,23 +1013,25 @@ void vndfs_add_sus_kstat(void __user **user_info) {
 	}
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
-	VNDFS_LOGI("is_fuse: %d, is_statically: '%d', target_ino: '%lu', target_pathname: '%s', spoofed_ino: '%lu', spoofed_dev: '%lu', spoofed_nlink: '%u', spoofed_size: '%llu', spoofed_atime_tv_sec: '%ld', spoofed_mtime_tv_sec: '%ld', spoofed_ctime_tv_sec: '%ld', spoofed_atime_tv_nsec: '%ld', spoofed_mtime_tv_nsec: '%ld', spoofed_ctime_tv_nsec: '%ld', spoofed_blksize: '%lu', spoofed_blocks: '%llu', is successfully added to SUS_KSTAT_HLIST\n",
+	VNDFS_LOGI("is_fuse: %d, is_statically: '%d', target_ino: '%lu', target_dev: '%lu', target_pathname: '%s', spoofed_ino: '%lu', spoofed_dev: '%lu', spoofed_nlink: '%u', spoofed_size: '%llu', spoofed_atime_tv_sec: '%ld', spoofed_mtime_tv_sec: '%ld', spoofed_ctime_tv_sec: '%ld', spoofed_atime_tv_nsec: '%ld', spoofed_mtime_tv_nsec: '%ld', spoofed_ctime_tv_nsec: '%ld', spoofed_blksize: '%lu', spoofed_blocks: '%llu', spoofed_mnt_id: '%d', is successfully added to SUS_KSTAT_HLIST\n",
 			new_entry->is_fuse,
-			new_entry->info.is_statically, new_entry->info.target_ino, new_entry->info.target_pathname,
+			new_entry->info.is_statically, new_entry->info.target_ino,
+			new_entry->target_dev, new_entry->info.target_pathname,
 			new_entry->info.spoofed_ino, new_entry->info.spoofed_dev,
 			new_entry->info.spoofed_nlink, new_entry->info.spoofed_size,
 			new_entry->info.spoofed_atime_tv_sec, new_entry->info.spoofed_mtime_tv_sec, new_entry->info.spoofed_ctime_tv_sec,
 			new_entry->info.spoofed_atime_tv_nsec, new_entry->info.spoofed_mtime_tv_nsec, new_entry->info.spoofed_ctime_tv_nsec,
-			new_entry->info.spoofed_blksize, new_entry->info.spoofed_blocks);
+			new_entry->info.spoofed_blksize, new_entry->info.spoofed_blocks, new_entry->spoofed_mnt_id);
 #else
-	VNDFS_LOGI("is_fuse: %d, is_statically: '%d', target_ino: '%lu', target_pathname: '%s', spoofed_ino: '%lu', spoofed_dev: '%lu', spoofed_nlink: '%u', spoofed_size: '%u', spoofed_atime_tv_sec: '%ld', spoofed_mtime_tv_sec: '%ld', spoofed_ctime_tv_sec: '%ld', spoofed_atime_tv_nsec: '%ld', spoofed_mtime_tv_nsec: '%ld', spoofed_ctime_tv_nsec: '%ld', spoofed_blksize: '%lu', spoofed_blocks: '%llu', is successfully added to SUS_KSTAT_HLIST\n",
+	VNDFS_LOGI("is_fuse: %d, is_statically: '%d', target_ino: '%lu', target_dev: '%lu', target_pathname: '%s', spoofed_ino: '%lu', spoofed_dev: '%lu', spoofed_nlink: '%u', spoofed_size: '%u', spoofed_atime_tv_sec: '%ld', spoofed_mtime_tv_sec: '%ld', spoofed_ctime_tv_sec: '%ld', spoofed_atime_tv_nsec: '%ld', spoofed_mtime_tv_nsec: '%ld', spoofed_ctime_tv_nsec: '%ld', spoofed_blksize: '%lu', spoofed_blocks: '%llu', spoofed_mnt_id: '%d', is successfully added to SUS_KSTAT_HLIST\n",
 			new_entry->is_fuse,
-			new_entry->info.is_statically, new_entry->info.target_ino, new_entry->info.target_pathname,
+			new_entry->info.is_statically, new_entry->info.target_ino,
+			new_entry->target_dev, new_entry->info.target_pathname,
 			new_entry->info.spoofed_ino, new_entry->info.spoofed_dev,
 			new_entry->info.spoofed_nlink, new_entry->info.spoofed_size,
 			new_entry->info.spoofed_atime_tv_sec, new_entry->info.spoofed_mtime_tv_sec, new_entry->info.spoofed_ctime_tv_sec,
 			new_entry->info.spoofed_atime_tv_nsec, new_entry->info.spoofed_mtime_tv_nsec, new_entry->info.spoofed_ctime_tv_nsec,
-			new_entry->info.spoofed_blksize, new_entry->info.spoofed_blocks);
+			new_entry->info.spoofed_blksize, new_entry->info.spoofed_blocks, new_entry->spoofed_mnt_id);
 #endif
 	hash_add_rcu(SUS_KSTAT_HLIST, &new_entry->node, info.target_ino);
 	mutex_unlock(&vndfs_mutex_lock_sus_kstat);
@@ -489,6 +1058,11 @@ void vndfs_update_sus_kstat(void __user **user_info) {
 		goto out_copy_to_user;
 	}
 
+	if (!memchr(info.target_pathname, '\0', sizeof(info.target_pathname))) {
+		info.err = -EINVAL;
+		goto out_copy_to_user;
+	}
+
 	new_entry = kzalloc(sizeof(struct st_vndfs_sus_kstat_hlist), GFP_KERNEL);
 	if (!new_entry) {
 		info.err = -ENOMEM;
@@ -501,11 +1075,10 @@ void vndfs_update_sus_kstat(void __user **user_info) {
 	hash_for_each_safe(SUS_KSTAT_HLIST, bkt, tmp_hlist_node, tmp_entry, node) {
 		if (!strcmp(tmp_entry->info.target_pathname, info.target_pathname)) {
 			memcpy(&new_entry->info, &tmp_entry->info, sizeof(tmp_entry->info));
-			new_entry->target_ino = info.target_ino;
-			new_entry->target_dev = tmp_entry->target_dev;
-			new_entry->is_fuse = tmp_entry->is_fuse;
 			new_entry->info.target_ino = info.target_ino;
-			info.err = vndfs_mark_inode_sus_kstat(new_entry->info.target_pathname, new_entry);
+			new_entry->target_ino = info.target_ino;
+			new_entry->is_fuse = tmp_entry->is_fuse;
+			info.err = vndfs_mark_inode_sus_kstat(new_entry->info.target_pathname, new_entry, true);
 			if (info.err) {
 				mutex_unlock(&vndfs_mutex_lock_sus_kstat);
 				kfree(new_entry);
@@ -523,6 +1096,7 @@ void vndfs_update_sus_kstat(void __user **user_info) {
 		}
 	}
 	mutex_unlock(&vndfs_mutex_lock_sus_kstat);
+	kfree(new_entry);
 	info.err = -ENOENT;
 
 out_copy_to_user:
@@ -532,7 +1106,33 @@ out_copy_to_user:
 	VNDFS_LOGI("CMD_VNDFS_UPDATE_SUS_KSTAT -> ret: %d\n", info.err);
 }
 
-void vndfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *stat)
+__attribute__((hot)) bool vndfs_is_inode_sus_kstat(struct inode *inode, bool *out_is_fuse) {
+	struct fuse_inode *fi = NULL;
+
+	if (!inode)
+		return false;
+	if (inode->i_sb->s_magic == FUSE_SUPER_MAGIC) {
+		fi = get_fuse_inode(inode);
+		if (!fi || !fi->inode.i_mapping) {
+			VNDFS_LOGE("fi || fi->inode.i_mapping is NULL\n");
+			return false;
+		}
+		if (test_bit(AS_FLAGS_SUS_KSTAT, &fi->inode.i_state)) {
+			*out_is_fuse = true;
+			return true;
+		}
+		return false;
+	}
+	if (!inode || !inode->i_mapping) {
+		VNDFS_LOGE("inode->i_mapping is NULL\n");
+		return false;
+	}
+	if (test_bit(AS_FLAGS_SUS_KSTAT, &inode->i_state))
+		return true;
+	return false;
+}
+
+void vndfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *stat, u32 result_mask)
 {
 	struct st_vndfs_sus_kstat_hlist *entry = NULL;
 	struct fuse_inode *fi = NULL;
@@ -540,41 +1140,32 @@ void vndfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *s
 	dev_t target_dev = 0;
 	bool is_fuse = false;
 
-	if (inode->i_sb->s_magic == FUSE_SUPER_MAGIC) {
-		fi = get_fuse_inode(inode);
-		if (!fi || !fi->inode.i_mapping) {
-			VNDFS_LOGE("fi || fi->inode.i_mapping is NULL\n");
+	switch (result_mask) {
+		case STATX_SUS_KSTAT:
+			target_ino = inode->i_ino;
+			target_dev = inode->i_sb->s_dev;
+			goto out_spoof_kstat;
+		case STATX_SUS_KSTAT_FUSE:
+			fi = get_fuse_inode(inode);
+			if (!fi)
+				return;
+			target_ino = fi->inode.i_ino;
+			target_dev = fi->inode.i_sb->s_dev;
+			is_fuse = true;
+			goto out_spoof_kstat;
+		default:
 			return;
-		}
-		if (!test_bit(AS_FLAGS_SUS_KSTAT, &fi->inode.i_state) ||
-			!vndfs_is_current_proc_umounted_app())
-			return;
-		target_ino = fi->inode.i_ino;
-		target_dev = fi->inode.i_sb->s_dev;
-		is_fuse = true;
-		goto out_spoof_kstat;
 	}
-
-	if (!inode->i_mapping) {
-		VNDFS_LOGE("inode->i_mapping is NULL\n");
-		return;
-	}
-
-	if (!test_bit(AS_FLAGS_SUS_KSTAT, &inode->i_state) ||
-	    !vndfs_is_current_proc_umounted_app())
-		return;
-
-	target_ino = inode->i_ino;
-	target_dev = inode->i_sb->s_dev;
 
 out_spoof_kstat:
 	rcu_read_lock();
 	hash_for_each_possible_rcu(SUS_KSTAT_HLIST, entry, node, target_ino) {
-		if (entry->target_dev == target_dev &&
+		if (entry->target_ino == target_ino &&
+			entry->target_dev == target_dev &&
 			entry->is_fuse == is_fuse)
 		{
-			VNDFS_LOGI("spoofing kstat for path: %s, target_ino: %lu, target_dev: %u\n",
-					entry->info.target_pathname, target_ino, target_dev);
+			VNDFS_LOGI("spoofing kstat for vfs_getattr_nosec, target_ino: %lu, target_dev: %u\n",
+					target_ino, target_dev);
 			if (entry->info.flags & KSTAT_SPOOF_INO)
 				stat->ino = entry->info.spoofed_ino;
 			if (entry->info.flags & KSTAT_SPOOF_DEV)
@@ -599,6 +1190,9 @@ out_spoof_kstat:
 				stat->blksize = entry->info.spoofed_blksize;
 			if (entry->info.flags & KSTAT_SPOOF_BLOCKS)
 				stat->blocks = entry->info.spoofed_blocks;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
+			stat->mnt_id = entry->spoofed_mnt_id;
+#endif // #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
 			rcu_read_unlock();
 			return;
 		}
@@ -619,23 +1213,16 @@ void vndfs_sus_kstat_spoof_show_map_vma(struct inode *inode, dev_t *out_dev, uns
 			VNDFS_LOGE("fi || fi->inode.i_mapping is NULL\n");
 			return;
 		}
-		if (!test_bit(AS_FLAGS_SUS_KSTAT, &fi->inode.i_state) ||
-			!vndfs_is_current_proc_umounted_app())
-			return;
 		target_ino = fi->inode.i_ino;
 		target_dev = fi->inode.i_sb->s_dev;
 		is_fuse = true;
 		goto out_spoof_kstat;
 	}
 
-	if (!inode->i_mapping) {
+	if (!inode || !inode->i_mapping) {
 		VNDFS_LOGE("inode->i_mapping is NULL\n");
 		return;
 	}
-
-	if (!test_bit(AS_FLAGS_SUS_KSTAT, &inode->i_state) ||
-		!vndfs_is_current_proc_umounted_app())
-		return;
 
 	target_ino = inode->i_ino;
 	target_dev = inode->i_sb->s_dev;
@@ -643,10 +1230,11 @@ void vndfs_sus_kstat_spoof_show_map_vma(struct inode *inode, dev_t *out_dev, uns
 out_spoof_kstat:
 	rcu_read_lock();
 	hash_for_each_possible_rcu(SUS_KSTAT_HLIST, entry, node, target_ino) {
-		if (entry->target_dev == target_dev &&
+		if (entry->target_ino == target_ino &&
+			entry->target_dev == target_dev &&
 			entry->is_fuse == is_fuse)
 		{
-			VNDFS_LOGI("spoofing kstat for target_ino: %lu, target_dev: %u\n", target_ino, target_dev);
+			VNDFS_LOGI("spoofing kstat for show_map_vma, target_ino: %lu, target_dev: %u\n", target_ino, target_dev);
 			*out_dev = entry->info.spoofed_dev;
 			*out_ino = entry->info.spoofed_ino;
 			rcu_read_unlock();
@@ -656,6 +1244,62 @@ out_spoof_kstat:
 	rcu_read_unlock();
 }
 
+int vndfs_sus_kstat_spoof_vfs_statfs(struct inode *inode, struct kstatfs *buf, bool *is_fuse) {
+	struct st_vndfs_sus_kstat_hlist *entry = NULL;
+	struct inode *target_inode = inode;
+
+	if (*is_fuse)
+		target_inode = &get_fuse_inode(inode)->inode;
+
+	rcu_read_lock();
+	hash_for_each_possible_rcu(SUS_KSTAT_HLIST, entry, node, target_inode->i_ino) {
+		if (entry->target_ino == target_inode->i_ino &&
+		    entry->target_dev == target_inode->i_sb->s_dev &&
+		    entry->is_fuse == *is_fuse)
+		{
+			VNDFS_LOGI("spoofing kstat for vfs_statfs, target_ino: %lu, target_dev: %u\n", target_inode->i_ino, target_inode->i_sb->s_dev);
+			memcpy(buf, &entry->spoofed_kstatfs, sizeof(struct kstatfs));
+			rcu_read_unlock();
+			return 0;
+		}
+	}
+	rcu_read_unlock();
+	return -EINVAL;
+}
+
+void vndfs_sus_kstat_spoof_inotify_fdinfo(unsigned long *out_target_ino, dev_t *out_target_dev) {
+	struct st_vndfs_sus_kstat_hlist *entry = NULL;
+
+	rcu_read_lock();
+	hash_for_each_possible_rcu(SUS_KSTAT_HLIST, entry, node, *out_target_ino) {
+		if (entry->target_ino == *out_target_ino && entry->target_dev == *out_target_dev)
+		{
+			VNDFS_LOGI("spoofing kstat for inotify_fdinfo, target_ino: %lu, target_dev: %u\n", *out_target_ino, *out_target_dev);
+			*out_target_ino = entry->info.spoofed_ino;
+			*out_target_dev = entry->info.spoofed_dev;
+			rcu_read_unlock();
+			return;
+		}
+	}
+	rcu_read_unlock();
+}
+
+void vndfs_sus_kstat_spoof_proc_fd_seq_show(int *out_target_mnt_id, unsigned long *out_target_ino, dev_t target_dev) {
+	struct st_vndfs_sus_kstat_hlist *entry = NULL;
+
+	rcu_read_lock();
+	hash_for_each_possible_rcu(SUS_KSTAT_HLIST, entry, node, *out_target_ino) {
+		if (entry->target_ino == *out_target_ino && entry->target_dev == target_dev)
+		{
+			VNDFS_LOGI("spoofing kstat for proc_fd_seq_show, target_ino: %lu, target_dev: %u\n", *out_target_ino, target_dev);
+			*out_target_mnt_id = entry->spoofed_mnt_id;
+			*out_target_ino = entry->info.spoofed_ino;
+			rcu_read_unlock();
+			return;
+		}
+	}
+	rcu_read_unlock();
+}
 void vndfs_sus_ino_for_generic_fillattr(unsigned long ino, struct kstat *stat)
 {
 	struct st_vndfs_sus_kstat_hlist *entry = NULL;
@@ -707,6 +1351,7 @@ void vndfs_sus_ino_for_show_map_vma(unsigned long ino, dev_t *out_dev, unsigned 
 	}
 	rcu_read_unlock();
 }
+
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 
 /* spoof_uname */
@@ -725,6 +1370,12 @@ void vndfs_set_uname(void __user **user_info) {
 
 	if (*info.release == '\0' || *info.version == '\0') {
 		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	if (!memchr(info.release, '\0', sizeof(info.release)) ||
+	    !memchr(info.version, '\0', sizeof(info.version))) {
+		info.err = -EINVAL;
 		goto out_copy_to_user;
 	}
 
@@ -798,7 +1449,7 @@ out_copy_to_user:
 
 /* spoof_cmdline_or_bootconfig */
 #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-static char *fake_cmdline_or_bootconfig = NULL;
+static char fake_cmdline_or_bootconfig[VNDFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE];
 DEFINE_STATIC_KEY_FALSE(vndfs_is_fake_cmdline_or_bootconfig_buffer_set);
 static DEFINE_SEQLOCK(vndfs_fake_cmdline_or_bootconfig_seqlock);
 
@@ -819,18 +1470,13 @@ void vndfs_set_cmdline_or_bootconfig(void __user **user_info) {
 		goto out_copy_to_user;
 	}
 
-	if (*info->fake_cmdline_or_bootconfig == '\0') {
+	if (!memchr(info->fake_cmdline_or_bootconfig, '\0',
+		    sizeof(info->fake_cmdline_or_bootconfig)) ||
+	    *info->fake_cmdline_or_bootconfig == '\0') {
 		info->err = -EINVAL;
 		goto out_copy_to_user;
 	}
 
-	if (!fake_cmdline_or_bootconfig) {
-		fake_cmdline_or_bootconfig = (char *)kzalloc(VNDFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE, GFP_KERNEL);
-		if (!fake_cmdline_or_bootconfig) {
-			info->err = -ENOMEM;
-			goto out_copy_to_user;
-		}
-	}
 
 	write_seqlock(&vndfs_fake_cmdline_or_bootconfig_seqlock);
 	strscpy(fake_cmdline_or_bootconfig,
@@ -857,15 +1503,20 @@ out_copy_to_user:
 
 int vndfs_spoof_cmdline_or_bootconfig(struct seq_file *m) {
 	unsigned seq;
+	char *buf;
 
 	if (!static_branch_likely(&vndfs_is_fake_cmdline_or_bootconfig_buffer_set))
 		return 1;
-
+	buf = kmalloc(VNDFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE, GFP_KERNEL);
+	if (!buf) {
+		return 1;
+	}
 	do {
 		seq = read_seqbegin(&vndfs_fake_cmdline_or_bootconfig_seqlock);
-		seq_puts(m, fake_cmdline_or_bootconfig);
+		strscpy(buf, fake_cmdline_or_bootconfig, VNDFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE);
 	} while (read_seqretry(&vndfs_fake_cmdline_or_bootconfig_seqlock, seq));
-
+	seq_puts(m, buf);
+	kfree(buf);
 	return 0;
 }
 #endif
@@ -873,8 +1524,8 @@ int vndfs_spoof_cmdline_or_bootconfig(struct seq_file *m) {
 /* open_redirect */
 #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 static DEFINE_MUTEX(vndfs_mutex_lock_open_redirect);
-static DEFINE_HASHTABLE(OPEN_REDIRECT_HLIST, 10);
-DEFINE_STATIC_SRCU(vndfs_srcu_open_redirect);
+static DEFINE_HASHTABLE(OPEN_REDIRECT_HLIST, 14);
+DEFINE_SRCU(vndfs_srcu_open_redirect);
 
 void vndfs_add_open_redirect(void __user **user_info) {
 	struct st_vndfs_open_redirect info = {0};
@@ -887,6 +1538,12 @@ void vndfs_add_open_redirect(void __user **user_info) {
 
 	if (copy_from_user(&info, (struct st_vndfs_open_redirect __user*)*user_info, sizeof(info))) {
 		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	if (!memchr(info.target_pathname, '\0', sizeof(info.target_pathname)) ||
+	    !memchr(info.redirected_pathname, '\0', sizeof(info.redirected_pathname))) {
+		info.err = -EINVAL;
 		goto out_copy_to_user;
 	}
 
@@ -964,7 +1621,7 @@ void vndfs_add_open_redirect(void __user **user_info) {
 	new_entry_redirected->redirected_dev = target_inode->i_sb->s_dev;
 	new_entry_redirected->info.uid_scheme = info.uid_scheme;
 	new_entry_redirected->reversed_lookup_only = true;
-	new_entry_redirected->spoofed_mnt_id = real_mount(target_path.mnt)->mnt_id;
+	new_entry_redirected->spoofed_mnt_id = new_entry_target->spoofed_mnt_id;
 	memcpy(&new_entry_redirected->spoofed_kstatfs, &new_entry_target->spoofed_kstatfs, sizeof(struct kstatfs));
 	strscpy(new_entry_redirected->info.target_pathname, info.redirected_pathname, VNDFS_MAX_LEN_PATHNAME - 1);
 	strscpy(new_entry_redirected->info.redirected_pathname, info.target_pathname, VNDFS_MAX_LEN_PATHNAME - 1);
@@ -1005,7 +1662,7 @@ void vndfs_add_open_redirect(void __user **user_info) {
 		set_bit(AS_FLAGS_OPEN_REDIRECT, &redirected_inode->i_state);
 		set_bit(AS_FLAGS_OPEN_REDIRECT, &target_inode->i_state);
 		mutex_unlock(&vndfs_mutex_lock_open_redirect);
-		synchronize_rcu();
+		synchronize_srcu(&vndfs_srcu_open_redirect);
 		if (is_second_dup_found)
 			kfree(tmp_entry_redirected);
 		kfree(tmp_entry_target);
@@ -1043,6 +1700,7 @@ struct filename *vndfs_open_redirect_spoof_do_sys_openat(struct inode *inode) {
 
 	hash_for_each_possible_rcu(OPEN_REDIRECT_HLIST, entry, node, inode->i_ino) {
 		if (!entry->reversed_lookup_only &&
+			entry->target_ino == inode->i_ino &&
 			entry->target_dev == inode->i_sb->s_dev)
 		{
 			switch(entry->info.uid_scheme) {
@@ -1104,22 +1762,19 @@ int vndfs_open_redirect_spoof_vfs_readlink(struct inode *inode, char __user *buf
 
 	hash_for_each_possible_rcu(OPEN_REDIRECT_HLIST, entry, node, inode->i_ino) {
 		if (entry->reversed_lookup_only &&
+			entry->target_ino == inode->i_ino &&
 			entry->target_dev == inode->i_sb->s_dev)
 		{
 			VNDFS_LOGI("spoof path '%s' to '%s'\n",
 					entry->info.target_pathname, entry->info.redirected_pathname);
-			if (strlen(entry->info.redirected_pathname) >= buflen) {
-				VNDFS_LOGE("buflen not big enough\n");
-				srcu_read_unlock(&vndfs_srcu_open_redirect, srcu_idx);
-				return -ENAMETOOLONG;
-			}
-			if (copy_to_user(buffer, entry->info.redirected_pathname, strlen(entry->info.redirected_pathname))) {
-				VNDFS_LOGE("copy_to_user() failed\n");
+			int len = min_t(size_t, buflen, strlen(entry->info.redirected_pathname));
+
+			if (copy_to_user(buffer, entry->info.redirected_pathname, len)) {
 				srcu_read_unlock(&vndfs_srcu_open_redirect, srcu_idx);
 				return -EFAULT;
 			}
 			srcu_read_unlock(&vndfs_srcu_open_redirect, srcu_idx);
-			return 0;
+			return len;
 		}
 	}
 	srcu_read_unlock(&vndfs_srcu_open_redirect, srcu_idx);
@@ -1132,6 +1787,7 @@ int vndfs_open_redirect_spoof_do_proc_readlink(struct inode *inode, char *tmp_bu
 
 	hash_for_each_possible_rcu(OPEN_REDIRECT_HLIST, entry, node, inode->i_ino) {
 		if (entry->reversed_lookup_only &&
+			entry->target_ino == inode->i_ino &&
 			entry->target_dev == inode->i_sb->s_dev)
 		{
 			VNDFS_LOGI("spoof path '%s' to '%s'\n",
@@ -1150,72 +1806,28 @@ int vndfs_open_redirect_spoof_do_proc_readlink(struct inode *inode, char *tmp_bu
 	return -ENOENT;
 }
 
-int vndfs_open_redirect_spoof_vfs_statfs(struct inode *inode, struct kstatfs *buf) {
+/* callers must hold and release the "vndfs_srcu_open_redirect" lock themselves. */
+int vndfs_open_redirect_spoof_show_map_vma_srcu(struct inode *inode, unsigned long *out_ino, dev_t *out_dev, char **out_spoofed_name) {
 	struct st_vndfs_open_redirect_hlist *entry = NULL;
-	int srcu_idx = srcu_read_lock(&vndfs_srcu_open_redirect);
 
-	hash_for_each_possible_rcu(OPEN_REDIRECT_HLIST, entry, node, inode->i_ino) {
-		if (entry->reversed_lookup_only &&
-			entry->target_dev == inode->i_sb->s_dev)
-		{
-			VNDFS_LOGI("spoof kstatfs for redirected path: '%s'\n",
-					entry->info.target_pathname);
-			memcpy(buf, &entry->spoofed_kstatfs, sizeof(struct kstatfs));
-			srcu_read_unlock(&vndfs_srcu_open_redirect, srcu_idx);
-			return 0;
-		}
-	}
-	srcu_read_unlock(&vndfs_srcu_open_redirect, srcu_idx);
-	return -EINVAL;
-}
-
-int vndfs_open_redirect_spoof_seq_show(struct inode *inode, int *out_mnt_id, unsigned long *out_ino) {
-	struct st_vndfs_open_redirect_hlist *entry = NULL;
-	int srcu_idx = srcu_read_lock(&vndfs_srcu_open_redirect);
-
-	hash_for_each_possible_rcu(OPEN_REDIRECT_HLIST, entry, node, inode->i_ino) {
-		if (entry->reversed_lookup_only &&
-			entry->target_dev == inode->i_sb->s_dev)
-		{
-			*out_mnt_id = entry->spoofed_mnt_id;
-			*out_ino = entry->redirected_ino;
-			srcu_read_unlock(&vndfs_srcu_open_redirect, srcu_idx);
-			return 0;
-		}
-	}
-	srcu_read_unlock(&vndfs_srcu_open_redirect, srcu_idx);
-	return -EINVAL;
-}
-
-int vndfs_open_redirect_spoof_show_map_vma(struct inode *inode, unsigned long *out_ino, dev_t *out_dev, char *spoofed_name) {
-	struct st_vndfs_open_redirect_hlist *entry = NULL;
-	int srcu_idx = srcu_read_lock(&vndfs_srcu_open_redirect);
-
-	if (spoofed_name) {
-		VNDFS_LOGE("spoofed_name must be NULL first!\n");
+	if (!out_spoofed_name || *out_spoofed_name != NULL) {
+		VNDFS_LOGE("out_spoofed_name cannot be NULL and *out_spoofed_name has to be NULL\n");
 		return -EINVAL;
 	}
 
 	hash_for_each_possible_rcu(OPEN_REDIRECT_HLIST, entry, node, inode->i_ino) {
 		if (entry->reversed_lookup_only &&
+			entry->target_ino == inode->i_ino &&
 			entry->target_dev == inode->i_sb->s_dev)
 		{
-			spoofed_name = kzalloc(VNDFS_MAX_LEN_PATHNAME, GFP_KERNEL);
-			if (!spoofed_name) {
-				VNDFS_LOGE("no enough memeory\n");
-				srcu_read_unlock(&vndfs_srcu_open_redirect, srcu_idx);
-				return -ENOMEM;
-			}
 			VNDFS_LOGI("spoof maps ino/dev/name for redirected path: '%s'\n",
 					entry->info.target_pathname);
 			*out_ino = entry->redirected_ino;
 			*out_dev = entry->redirected_dev;
-			strscpy(spoofed_name, entry->info.redirected_pathname, VNDFS_MAX_LEN_PATHNAME - 1);
-			srcu_read_unlock(&vndfs_srcu_open_redirect, srcu_idx);
+			*out_spoofed_name = entry->info.redirected_pathname;
 			return 0;
 		}
 	}
-	srcu_read_unlock(&vndfs_srcu_open_redirect, srcu_idx);
 	return -EINVAL;
 }
 #endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
@@ -1229,6 +1841,11 @@ void vndfs_add_sus_map(void __user **user_info) {
 
 	if (copy_from_user(&info, (struct st_vndfs_sus_map __user*)*user_info, sizeof(info))) {
 		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	if (!memchr(info.target_pathname, '\0', sizeof(info.target_pathname))) {
+		info.err = -EINVAL;
 		goto out_copy_to_user;
 	}
 
@@ -1257,7 +1874,460 @@ out_copy_to_user:
 }
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 
-/* susfs avc log spoofing */
+/* priority uid filter */
+#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+/*****************************************/
+/* getpriority uid filter (bitmap)       */
+/*****************************************/
+/* The uids that are hidden from the apps that abuse the getpriority syscall
+ * to find out the existing uids. Only the uids within the app uid range
+ * (10000 - 19999) are supported.
+ */
+struct vndfs_priority_uid_filter_bitmap {
+	struct rcu_head			rcu;
+	unsigned long			bits[VNDFS_UID_FILTER_BITMAP_LEN];
+};
+
+static struct vndfs_priority_uid_filter_bitmap __rcu *priority_uid_filter_bitmap;
+static DEFINE_MUTEX(vndfs_mutex_lock_priority_uid_filter);
+static unsigned long priority_uid_filter_generation;
+/*
+ * The app package names of the apps that are currently filtered.
+ * They are stored so that the uids of the apps can be resolved again whenever
+ * the apps are installed or uninstalled, because the uid of an app changes
+ * when the app is reinstalled.
+ * Protected by vndfs_mutex_lock_priority_uid_filter.
+ */
+static char *vndfs_priority_app_strings = NULL;
+/* Ensures that there is only one resolving thread running at the same time */
+static atomic_t vndfs_priority_app_strings_running = ATOMIC_INIT(0);
+
+/*
+ * Checks whether the given string is a valid app package name.
+ * Returns true if it is a valid app package name.
+ */
+static bool vndfs_is_valid_app_name(const char *app_name) {
+	const char *p = app_name;
+	size_t len = strlen(app_name);
+
+	if (len == 0 || len > 255)
+		return false;
+
+	/* reject the relative paths to prevent any path traversal */
+	if (!strcmp(app_name, ".") || !strcmp(app_name, ".."))
+		return false;
+
+	for (; *p != '\0'; p++) {
+		if ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+			(*p >= '0' && *p <= '9') || *p == '.' || *p == '_')
+			continue;
+		return false;
+	}
+
+	return true;
+}
+
+/*
+ * Resolves the uid of the given app package name from /data/system/packages.list.
+ * Returns 0 on success, a negative errno on failure.
+ */
+static int vndfs_resolve_priority_app_uid(const char *app_name, uid_t *uid) {
+	struct file *fp;
+	char *buf = NULL;
+	char *line, *tmp, *p;
+	char *pkg_name, *uid_str;
+	loff_t pos = 0;
+	size_t size;
+	unsigned long val;
+	int ret = -ENOENT;
+
+	if (!app_name || !*app_name || !uid)
+		return -EINVAL;
+
+	if (!vndfs_is_valid_app_name(app_name))
+		return -EINVAL;
+
+	fp = filp_open("/data/system/packages.list", O_RDONLY | O_NOATIME, 0);
+	if (IS_ERR(fp)) {
+		ret = PTR_ERR(fp);
+		VNDFS_LOGE("failed to open /data/system/packages.list: %d\n", ret);
+		return ret;
+	}
+
+	size = i_size_read(file_inode(fp));
+	if (size <= 0 || size > (4 * 1024 * 1024)) {
+		filp_close(fp, NULL);
+		return -EFBIG;
+	}
+
+	buf = vmalloc(size + 1);
+	if (!buf) {
+		filp_close(fp, NULL);
+		return -ENOMEM;
+	}
+	buf[size] = '\0';
+
+	ret = vndfs_kernel_read(fp, buf, size, &pos);
+	filp_close(fp, NULL);
+	if (ret != (int)size) {
+		vfree(buf);
+		return -EIO;
+	}
+
+	line = buf;
+	while (line && *line) {
+		p = strchr(line, '\n');
+		if (p) {
+			*p = '\0';
+			tmp = p + 1;
+		} else {
+			tmp = NULL;
+		}
+
+		/* skip empty lines */
+		if (*line == '\0' || *line == '\r') {
+			line = tmp;
+			continue;
+		}
+
+		/* packages.list format: <package> <uid> <gid> ... */
+		pkg_name = strsep(&line, " \t");
+		if (!pkg_name || *pkg_name == '\0') {
+			line = tmp;
+			continue;
+		}
+
+		uid_str = strsep(&line, " \t");
+		if (!uid_str || *uid_str == '\0') {
+			line = tmp;
+			continue;
+		}
+
+		if (!strcmp(pkg_name, app_name)) {
+			if (kstrtoul(uid_str, 10, &val)) {
+				vfree(buf);
+				return -EINVAL;
+			}
+
+			if (val > (uid_t)-1) {
+				vfree(buf);
+				return -ERANGE;
+			}
+			*uid = val % 100000;
+
+			vfree(buf);
+
+			if (*uid < VNDFS_UID_FILTER_MIN_UID ||
+			    *uid > VNDFS_UID_FILTER_MAX_UID)
+				return -EINVAL;
+
+			return 0;
+		}
+
+		line = tmp;
+	}
+
+	vfree(buf);
+	return -ENOENT;
+}
+
+/*
+ * Parses the comma separated list of the app package names, resolves the uid
+ * of every app and maps the uids into the given bitmap.
+ *
+ * The spaces before and after the commas are ignored.
+ * The given string is modified while it is being parsed.
+ * If 'skip_failed' is true, the apps whose data path cannot be found are
+ * skipped (they are uninstalled already), otherwise an error is returned.
+ * Returns 0 on success, a negative errno on failure.
+ */
+static int vndfs_parse_priority_app_names(char *app_str, unsigned long *bits, bool skip_failed) {
+	char *token = NULL;
+	char *saveptr = app_str;
+	uid_t uid = 0;
+	int ret;
+
+	while ((token = strsep(&saveptr, ",")) != NULL) {
+		token = strim(token);
+		if (*token == '\0') {
+			/* tolerate the empty items, e.g., "com.foo,,com.bar" */
+			continue;
+		}
+
+		if (!vndfs_is_valid_app_name(token)) {
+			VNDFS_LOGE("invalid app name '%s'\n", token);
+			return -EINVAL;
+		}
+
+		ret = vndfs_resolve_priority_app_uid(token, &uid);
+		if (ret) {
+			if (skip_failed)
+				continue;
+			return ret;
+		}
+
+		if (uid < VNDFS_UID_FILTER_MIN_UID || uid > VNDFS_UID_FILTER_MAX_UID) {
+			VNDFS_LOGE("the uid %u of the app '%s' is out of the allowed range [%d, %d]\n",
+					uid, token, VNDFS_UID_FILTER_MIN_UID,
+					VNDFS_UID_FILTER_MAX_UID);
+			if (!skip_failed)
+				return -EINVAL;
+			continue;
+		}
+
+		set_bit(uid - VNDFS_UID_FILTER_MIN_UID, bits);
+		VNDFS_LOGI("app_name '%s', uid '%u' is now added to priority_uid_filter_bitmap\n", token, uid);
+	}
+
+	return 0;
+}
+
+void vndfs_set_priority_uid_filter(void __user **user_info) {
+	struct st_vndfs_priority_uid_filter *info = NULL;
+	struct vndfs_priority_uid_filter_bitmap *new_bitmap = NULL;
+	struct vndfs_priority_uid_filter_bitmap *old_bitmap = NULL;
+	char *new_app_strings = NULL;
+	struct cred *orig_cred = NULL;
+	size_t app_str_len = 0;
+	int err = 0;
+	static bool is_uid_filter_set_before = false;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
+	info = vndfs_kvmalloc(sizeof(*info), GFP_KERNEL | __GFP_ZERO);
+#else
+	info = kvmalloc(sizeof(*info), GFP_KERNEL | __GFP_ZERO);
+#endif
+	if (!info) {
+		err = -ENOMEM;
+		goto out_copy_to_user;
+	}
+
+	if (copy_from_user(info, (struct st_vndfs_priority_uid_filter __user*)*user_info, sizeof(*info))) {
+		err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	/* the app names string must be null terminated within the buffer */
+	if (!memchr(info->app_strings, '\0', sizeof(info->app_strings))) {
+		VNDFS_LOGE("the app names string is not null terminated\n");
+		err = -EINVAL;
+		goto out_copy_to_user;
+	}
+
+	if (*info->app_strings == '\0') {
+		VNDFS_LOGE("the app names string cannot be empty\n");
+		err = -EINVAL;
+		goto out_copy_to_user;
+	}
+
+	app_str_len = strlen(info->app_strings);
+
+	/*
+	 * The app names are stored as they are, so that the uids of the apps can
+	 * be resolved again later on, when the apps are installed or uninstalled.
+	 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
+	new_app_strings = vndfs_kvmalloc(app_str_len + 1, GFP_KERNEL | __GFP_ZERO);
+#else
+	new_app_strings = kvmalloc(app_str_len + 1, GFP_KERNEL | __GFP_ZERO);
+#endif
+	if (!new_app_strings) {
+		err = -ENOMEM;
+		goto out_copy_to_user;
+	}
+	memcpy(new_app_strings, info->app_strings, app_str_len + 1);
+
+	new_bitmap = (struct vndfs_priority_uid_filter_bitmap *)kzalloc(sizeof(*new_bitmap), GFP_KERNEL);
+	if (!new_bitmap) {
+		err = -ENOMEM;
+		goto out_free_new_app_strings;
+	}
+
+	/*
+	 * The data paths of the apps cannot be accessed with the selinux
+	 * restrictions of the calling process, hence the selinux domain is
+	 * switched to the KernelSU one before the uids are resolved.
+	 */
+	orig_cred = vndfs_switch_to_ksu_domain();
+	if (!orig_cred) {
+		err = -EINVAL;
+		goto out_free_new_bitmap;
+	}
+
+	if (is_uid_filter_set_before)
+		VNDFS_LOGI("renewing the priority uid filter\n");
+	err = vndfs_parse_priority_app_names(info->app_strings, new_bitmap->bits, true);
+
+	vndfs_restore_creds(orig_cred);
+	orig_cred = NULL;
+
+	if (err)
+		goto out_free_new_bitmap;
+
+	/*
+	 * Publish the new bitmap and drop the old one.
+	 * The mutex serializes the writers, while the readers are protected
+	 * by RCU, hence the readers always see a consistent bitmap and they
+	 * never access a freed bitmap.
+	 */
+	mutex_lock(&vndfs_mutex_lock_priority_uid_filter);
+	old_bitmap = rcu_dereference_protected(priority_uid_filter_bitmap, lockdep_is_held(&vndfs_mutex_lock_priority_uid_filter));
+	rcu_assign_pointer(priority_uid_filter_bitmap, new_bitmap);
+	new_bitmap = NULL;
+	kvfree(vndfs_priority_app_strings);
+	vndfs_priority_app_strings = new_app_strings;
+	priority_uid_filter_generation++;
+	new_app_strings = NULL;
+	if (!is_uid_filter_set_before)
+		is_uid_filter_set_before = true;
+	mutex_unlock(&vndfs_mutex_lock_priority_uid_filter);
+	synchronize_rcu();
+	if (old_bitmap)
+		kfree_rcu(old_bitmap, rcu);
+
+	VNDFS_LOGI("the priority uid filter is set\n");
+	err = 0;
+
+out_free_new_bitmap:
+	if (new_bitmap)
+		kfree(new_bitmap);
+out_free_new_app_strings:
+	if (new_app_strings)
+		kvfree(new_app_strings);
+out_copy_to_user:
+	if (copy_to_user(&((struct st_vndfs_priority_uid_filter __user*)*user_info)->err, &err, sizeof(err))) {
+		err = -EFAULT;
+	}
+	VNDFS_LOGI("CMD_VNDFS_SET_PRIORITY_UID_FILTER -> ret: %d\n", err);
+	if (info)
+		kvfree(info);
+}
+
+/*
+ * The thread that resolves the uids of the stored app package names again,
+ * so that the filter stays up to date when the apps are installed or
+ * uninstalled, because the uid of an app changes when it is reinstalled.
+ */
+static int vndfs_priority_app_strings_worker(void *data) {
+	struct vndfs_priority_uid_filter_bitmap *new_bitmap = NULL;
+	struct vndfs_priority_uid_filter_bitmap *old_bitmap = NULL;
+	struct cred *orig_cred = NULL;
+	char *app_strings = NULL;
+	size_t app_str_len = 0;
+	int ret = 0;
+	unsigned long generation;
+
+	/*
+	 * The data paths of the apps cannot be accessed with the selinux
+	 * restrictions of the default domain of the thread, hence the selinux
+	 * domain is switched to the KernelSU one.
+	 */
+	orig_cred = vndfs_switch_to_ksu_domain();
+	if (!orig_cred)
+		goto out;
+
+	/* take a snapshot of the stored app package names */
+	mutex_lock(&vndfs_mutex_lock_priority_uid_filter);
+	generation = priority_uid_filter_generation;
+	if (vndfs_priority_app_strings) {
+		app_str_len = strlen(vndfs_priority_app_strings);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
+		app_strings = vndfs_kvmalloc(app_str_len + 1, GFP_KERNEL | __GFP_ZERO);
+#else
+		app_strings = kvmalloc(app_str_len + 1, GFP_KERNEL | __GFP_ZERO);
+#endif
+		if (app_strings)
+			memcpy(app_strings, vndfs_priority_app_strings, app_str_len + 1);
+	}
+	mutex_unlock(&vndfs_mutex_lock_priority_uid_filter);
+
+	if (!app_strings)
+		goto out_restore_creds;
+
+	new_bitmap = (struct vndfs_priority_uid_filter_bitmap *)kzalloc(sizeof(*new_bitmap), GFP_KERNEL);
+	if (!new_bitmap)
+		goto out_restore_creds;
+
+	/* the apps that are uninstalled already are skipped */
+	ret = vndfs_parse_priority_app_names(app_strings, new_bitmap->bits, true);
+	if (ret)
+		goto out_restore_creds;
+
+	/*
+	 * The old bitmap is zeroed and the newly resolved uids are mapped into
+	 * the new one, which is then published to the readers.
+	 */
+	mutex_lock(&vndfs_mutex_lock_priority_uid_filter);
+	if (generation != priority_uid_filter_generation) {
+		mutex_unlock(&vndfs_mutex_lock_priority_uid_filter);
+		goto out_restore_creds;
+	}
+	old_bitmap = rcu_dereference_protected(priority_uid_filter_bitmap, lockdep_is_held(&vndfs_mutex_lock_priority_uid_filter));
+	rcu_assign_pointer(priority_uid_filter_bitmap, new_bitmap);
+	new_bitmap = NULL;
+	mutex_unlock(&vndfs_mutex_lock_priority_uid_filter);
+	synchronize_rcu();
+	if (old_bitmap)
+		kfree_rcu(old_bitmap, rcu);
+
+	VNDFS_LOGI("the uids of the priority uid filter are resolved again\n");
+
+out_restore_creds:
+	vndfs_restore_creds(orig_cred);
+	orig_cred = NULL;
+out:
+	if (new_bitmap)
+		kfree(new_bitmap);
+	if (app_strings)
+		kvfree(app_strings);
+	atomic_set(&vndfs_priority_app_strings_running, 0);
+
+	return ret;
+}
+
+/*
+ * Resolves the uids of the stored app package names again in a new thread,
+ * because the resolving of the uids requires the KernelSU selinux domain,
+ * which must not be applied to the calling process.
+ */
+void vndfs_parse_priority_app_strings(void) {
+	/* do not spawn a new thread if there is already one running */
+	if (atomic_cmpxchg(&vndfs_priority_app_strings_running, 0, 1))
+		return;
+
+	if (IS_ERR(kthread_run(vndfs_priority_app_strings_worker, NULL, "vndfs_gpsp_appstr"))) {
+		atomic_set(&vndfs_priority_app_strings_running, 0);
+		VNDFS_LOGE("failed to create the thread vndfs_priority_app_strings\n");
+	}
+}
+
+/*
+ * Lockless lookup for the getpriority/setpriority syscall path.
+ * Returns true if the uid is hidden by the priority uid filter.
+ */
+bool vndfs_is_priority_uid_filtered(uid_t uid) {
+	struct vndfs_priority_uid_filter_bitmap *bitmap;
+
+	uid_t app_id = uid % 100000;
+
+	if (app_id < VNDFS_UID_FILTER_MIN_UID ||
+		app_id > VNDFS_UID_FILTER_MAX_UID)
+		return false;
+
+	/* no need rcu_read_lock() and rcu_read_unlock() here as caller already holds it */
+	bitmap = rcu_dereference(priority_uid_filter_bitmap);
+	if (likely(bitmap)) {
+		if (test_bit(app_id - VNDFS_UID_FILTER_MIN_UID, bitmap->bits)) {
+			//VNDFS_LOGI("uid '%u' is filtered\n", uid);
+			return true;
+		}
+	}
+
+	return false;
+}
+#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+
+/* vndfs avc log spoofing */
 DEFINE_STATIC_KEY_FALSE(vndfs_is_avc_log_spoofing_enabled);
 
 void vndfs_set_avc_log_spoofing(void __user **user_info) {
@@ -1301,10 +2371,10 @@ void vndfs_get_enabled_features(void __user **user_info) {
 	struct st_vndfs_enabled_features *info = (struct st_vndfs_enabled_features *)kzalloc(sizeof(struct st_vndfs_enabled_features), GFP_KERNEL);
 	char *buf_ptr = NULL;
 	size_t copied_size = 0;
+	int err = 0;
 
 	if (!info) {
-		int err = -ENOMEM;
-
+		err = -ENOMEM;
 		if (copy_to_user(&((struct st_vndfs_enabled_features __user*)*user_info)->err, &err, sizeof(err)))
 			err = -EFAULT;
 		VNDFS_LOGI("CMD_VNDFS_SHOW_ENABLED_FEATURES -> ret: %d\n", err);
@@ -1343,8 +2413,8 @@ void vndfs_get_enabled_features(void __user **user_info) {
 	if (info->err) goto out_copy_to_user;
 	buf_ptr = info->enabled_features + copied_size;
 #endif
-#ifdef CONFIG_KSU_SUSFS_HIDE_KSU_VNDFS_SYMBOLS
-	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_HIDE_KSU_VNDFS_SYMBOLS\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
+#ifdef CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
 	if (info->err) goto out_copy_to_user;
 	buf_ptr = info->enabled_features + copied_size;
 #endif
@@ -1363,6 +2433,11 @@ void vndfs_get_enabled_features(void __user **user_info) {
 	if (info->err) goto out_copy_to_user;
 	buf_ptr = info->enabled_features + copied_size;
 #endif
+#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER\n", buf_ptr, &copied_size, VNDFS_ENABLED_FEATURES_SIZE);
+	if (info->err) goto out_copy_to_user;
+	buf_ptr = info->enabled_features + copied_size;
+#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 
 	info->err = 0;
 out_copy_to_user:
@@ -1609,13 +2684,13 @@ struct work_struct vndfs_extra_works;
 static void vndfs_run_extra_works(struct work_struct *work) {
 	if (!ksu_cred)
 		return;
-	#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	vndfs_run_sus_path_loop();
-	#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 }
 
 /* vndfs_init */
-void vndfs_init(void) {\
+void vndfs_init(void) {
 	VNDFS_LOGI("Initializing vndfs_extra_works\n");
 	INIT_WORK(&vndfs_extra_works, vndfs_run_extra_works);
 	VNDFS_LOGI("susfs is initialized! version: " VNDFS_VERSION " \n");
@@ -1645,6 +2720,9 @@ bool vndfs_handle_ioctl(unsigned int cmd, unsigned long arg)
 		return true;
 	case CMD_VNDFS_ADD_SUS_PATH_LOOP:
 		vndfs_add_sus_path_loop(user_info);
+		return true;
+	case CMD_VNDFS_SET_SUS_PATH_UID_FILTER:
+		vndfs_set_sus_path_uid_filter(user_info);
 		return true;
 #endif
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
@@ -1697,6 +2775,11 @@ bool vndfs_handle_ioctl(unsigned int cmd, unsigned long arg)
 #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 	case CMD_VNDFS_ADD_SUS_MAP:
 		vndfs_add_sus_map(user_info);
+		return true;
+#endif
+#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+	case CMD_VNDFS_SET_PRIORITY_UID_FILTER:
+		vndfs_set_priority_uid_filter(user_info);
 		return true;
 #endif
 	case CMD_VNDFS_ENABLE_AVC_LOG_SPOOFING:
@@ -1753,9 +2836,4 @@ void vndfs_sus_su(void __user **user_info)
 out_copy_to_user:
 	if (copy_to_user(&((struct st_sus_su __user *)*user_info)->err, &info.err, sizeof(info.err)))
 		info.err = -EFAULT;
-}
-
-void vndfs_try_umount(uid_t uid)
-{
-	(void)uid;
 }

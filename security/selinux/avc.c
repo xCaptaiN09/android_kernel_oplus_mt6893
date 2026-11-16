@@ -14,6 +14,9 @@
  *	as published by the Free Software Foundation.
  */
 #include <linux/types.h>
+#ifdef CONFIG_KSU_SUSFS
+#include <linux/jump_label.h>
+#endif
 #include <linux/stddef.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -171,6 +174,12 @@ static void avc_dump_av(struct audit_buffer *ab, u16 tclass, u32 av)
  * @tsid: target security identifier
  * @tclass: target security class
  */
+#ifdef CONFIG_KSU_SUSFS
+extern u32 vndfs_ksu_sid;
+extern u32 vndfs_priv_app_sid;
+extern struct static_key_false vndfs_is_avc_log_spoofing_enabled;
+#endif
+
 static void avc_dump_query(struct audit_buffer *ab, struct selinux_state *state,
 			   u32 ssid, u32 tsid, u16 tclass)
 {
@@ -186,6 +195,11 @@ static void avc_dump_query(struct audit_buffer *ab, struct selinux_state *state,
 		kfree(scontext);
 	}
 
+#ifdef CONFIG_KSU_SUSFS
+	if (static_branch_unlikely(&vndfs_is_avc_log_spoofing_enabled) &&
+	    vndfs_ksu_sid && vndfs_priv_app_sid && tsid == vndfs_ksu_sid)
+		tsid = vndfs_priv_app_sid;
+#endif
 	rc = security_sid_to_context(state, tsid, &scontext, &scontext_len);
 	if (rc)
 		audit_log_format(ab, " tsid=%d", tsid);

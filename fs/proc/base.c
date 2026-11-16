@@ -101,6 +101,9 @@
 
 #ifdef CONFIG_KSU_SUSFS
 #include <linux/vndfs_def.h>
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+extern bool vndfs_is_inode_sus_path(struct inode *inode);
+#endif
 #endif
 
 #include "../../lib/kstrtox.h"
@@ -1650,6 +1653,10 @@ out:
 	return ERR_PTR(error);
 }
 
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+extern int vndfs_open_redirect_spoof_do_proc_readlink(struct inode *inode, char *tmp_buf, int buflen);
+#endif
+
 static int do_proc_readlink(struct path *path, char __user *buffer, int buflen)
 {
 	char *tmp = (char *)__get_free_page(GFP_KERNEL);
@@ -1658,6 +1665,17 @@ static int do_proc_readlink(struct path *path, char __user *buffer, int buflen)
 
 	if (!tmp)
 		return -ENOMEM;
+
+#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
+	if (VNDFS_IS_INODE_OPEN_REDIRECT(path->dentry->d_inode)) {
+		if (!vndfs_open_redirect_spoof_do_proc_readlink(path->dentry->d_inode, tmp, min_t(int, buflen, PAGE_SIZE))) {
+			len = strlen(tmp);
+			if (copy_to_user(buffer, tmp, len))
+				len = -EFAULT;
+			goto out;
+		}
+	}
+#endif
 
 	pathname = d_path(path, tmp, PAGE_SIZE);
 	len = PTR_ERR(pathname);
@@ -1681,7 +1699,7 @@ static int proc_pid_readlink(struct dentry * dentry, char __user * buffer, int b
 	struct path path;
 
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	if (unlikely(inode->i_state & INODE_STATE_SUS_PATH) && likely(current->vndfs_task_state & TASK_STRUCT_NON_ROOT_USER_APP_PROC))
+	if (vndfs_is_inode_sus_path(inode))
 		return -ENOENT;
 #endif
 
@@ -2257,6 +2275,10 @@ proc_map_files_readdir(struct file *file, struct dir_context *ctx)
 				vma = vma->vm_next) {
 			if (!vma->vm_file)
 				continue;
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+		if (VNDFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))
+			continue;
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 			if (++pos <= ctx->pos)
 				continue;
 
