@@ -144,16 +144,6 @@ static int fillonedir(struct dir_context *ctx, const char *name, int namlen,
 	struct inode *inode;
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 
-	if (buf->result)
-		return -EINVAL;
-	buf->result = verify_dirent_name(name, namlen);
-	if (buf->result < 0)
-		return buf->result;
-	d_ino = ino;
-	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino) {
-		buf->result = -EOVERFLOW;
-		return -EOVERFLOW;
-	}
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	inode = ilookup(buf->sb, ino);
 	if (!inode) {
@@ -166,6 +156,17 @@ static int fillonedir(struct dir_context *ctx, const char *name, int namlen,
 	iput(inode);
 orig_flow:
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+
+	if (buf->result)
+		return -EINVAL;
+	buf->result = verify_dirent_name(name, namlen);
+	if (buf->result < 0)
+		return buf->result;
+	d_ino = ino;
+	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino) {
+		buf->result = -EOVERFLOW;
+		return -EOVERFLOW;
+	}
 	buf->result++;
 	dirent = buf->dirent;
 	if (!access_ok(VERIFY_WRITE, dirent,
@@ -246,6 +247,19 @@ static int filldir(struct dir_context *ctx, const char *name, int namlen,
 	struct inode *inode;
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+	inode = ilookup(buf->sb, ino);
+	if (!inode) {
+		goto orig_flow;
+	}
+	if (vndfs_is_inode_sus_path(inode)) {
+		iput(inode);
+		return 0;
+	}
+	iput(inode);
+orig_flow:
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+
 	buf->error = verify_dirent_name(name, namlen);
 	if (unlikely(buf->error))
 		return buf->error;
@@ -264,18 +278,6 @@ static int filldir(struct dir_context *ctx, const char *name, int namlen,
 		if (__put_user(offset, &dirent->d_off))
 			goto efault;
 	}
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	inode = ilookup(buf->sb, ino);
-	if (!inode) {
-		goto orig_flow;
-	}
-	if (vndfs_is_inode_sus_path(inode)) {
-		iput(inode);
-		return 0;
-	}
-	iput(inode);
-orig_flow:
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	dirent = buf->current_dir;
 	if (__put_user(d_ino, &dirent->d_ino))
 		goto efault;
@@ -356,6 +358,19 @@ static int filldir64(struct dir_context *ctx, const char *name, int namlen,
 	struct inode *inode;
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+	inode = ilookup(buf->sb, ino);
+	if (!inode) {
+		goto orig_flow;
+	}
+	if (vndfs_is_inode_sus_path(inode)) {
+		iput(inode);
+		return 0;
+	}
+	iput(inode);
+orig_flow:
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+
 	buf->error = verify_dirent_name(name, namlen);
 	if (unlikely(buf->error))
 		return buf->error;
@@ -369,18 +384,6 @@ static int filldir64(struct dir_context *ctx, const char *name, int namlen,
 		if (__put_user(offset, &dirent->d_off))
 			goto efault;
 	}
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	inode = ilookup(buf->sb, ino);
-	if (!inode) {
-		goto orig_flow;
-	}
-	if (vndfs_is_inode_sus_path(inode)) {
-		iput(inode);
-		return 0;
-	}
-	iput(inode);
-orig_flow:
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	dirent = buf->current_dir;
 	if (__put_user(ino, &dirent->d_ino))
 		goto efault;
@@ -477,16 +480,6 @@ static int compat_fillonedir(struct dir_context *ctx, const char *name,
 	struct inode *inode;
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 
-	if (buf->result)
-		return -EINVAL;
-	buf->result = verify_dirent_name(name, namlen);
-	if (buf->result < 0)
-		return buf->result;
-	d_ino = ino;
-	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino) {
-		buf->result = -EOVERFLOW;
-		return -EOVERFLOW;
-	}
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	inode = ilookup(buf->sb, ino);
 	if (!inode) {
@@ -499,6 +492,17 @@ static int compat_fillonedir(struct dir_context *ctx, const char *name,
 	iput(inode);
 orig_flow:
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+
+	if (buf->result)
+		return -EINVAL;
+	buf->result = verify_dirent_name(name, namlen);
+	if (buf->result < 0)
+		return buf->result;
+	d_ino = ino;
+	if (sizeof(d_ino) < sizeof(ino) && d_ino != ino) {
+		buf->result = -EOVERFLOW;
+		return -EOVERFLOW;
+	}
 	buf->result++;
 	dirent = buf->dirent;
 	if (!access_ok(VERIFY_WRITE, dirent,
@@ -572,6 +576,19 @@ static int compat_filldir(struct dir_context *ctx, const char *name, int namlen,
 	struct inode *inode;
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+	inode = ilookup(buf->sb, ino);
+	if (!inode) {
+		goto orig_flow;
+	}
+	if (vndfs_is_inode_sus_path(inode)) {
+		iput(inode);
+		return 0;
+	}
+	iput(inode);
+orig_flow:
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
 		return -EINVAL;
@@ -588,18 +605,6 @@ static int compat_filldir(struct dir_context *ctx, const char *name, int namlen,
 		if (__put_user(offset, &dirent->d_off))
 			goto efault;
 	}
-#ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	inode = ilookup(buf->sb, ino);
-	if (!inode) {
-		goto orig_flow;
-	}
-	if (vndfs_is_inode_sus_path(inode)) {
-		iput(inode);
-		return 0;
-	}
-	iput(inode);
-orig_flow:
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	dirent = buf->current_dir;
 	if (__put_user(d_ino, &dirent->d_ino))
 		goto efault;
