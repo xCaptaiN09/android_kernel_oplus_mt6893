@@ -3788,7 +3788,11 @@ static int do_tmpfile(struct nameidata *nd, unsigned flags,
 		VNDFS_IS_INODE_OPEN_REDIRECT_WITHOUT_UID_CHECK(path.dentry->d_inode))
 	{
 		fake_filename = vndfs_open_redirect_spoof_do_sys_openat(path.dentry->d_inode);
-		if (fake_filename && !IS_ERR(fake_filename)) {
+		if (IS_ERR(fake_filename)) {
+			path_put(&path);
+			return PTR_ERR(fake_filename);
+		}
+		if (fake_filename) {
 			struct path fake_path;
 
 			/* filename_lookup() consumes fake_filename */
@@ -3839,7 +3843,11 @@ static int do_o_path(struct nameidata *nd, unsigned flags, struct file *file)
 			VNDFS_IS_INODE_OPEN_REDIRECT_WITHOUT_UID_CHECK(path.dentry->d_inode))
 		{
 			fake_filename = vndfs_open_redirect_spoof_do_sys_openat(path.dentry->d_inode);
-			if (fake_filename && !IS_ERR(fake_filename)) {
+			if (IS_ERR(fake_filename)) {
+				path_put(&path);
+				return PTR_ERR(fake_filename);
+			}
+			if (fake_filename) {
 				struct path fake_path;
 
 				/* filename_lookup() consumes fake_filename */
@@ -5201,7 +5209,7 @@ const char *vfs_get_link(struct dentry *dentry, struct delayed_call *done)
 
 	if (d_is_symlink(dentry)) {
 		res = ERR_PTR(security_inode_readlink(dentry));
-		if (res != -ENOENT)
+		if (!res)
 			res = inode->i_op->get_link(dentry, inode, done);
 	}
 	return res;

@@ -1668,10 +1668,13 @@ static int do_proc_readlink(struct path *path, char __user *buffer, int buflen)
 
 #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 	if (VNDFS_IS_INODE_OPEN_REDIRECT(path->dentry->d_inode)) {
-		if (!vndfs_open_redirect_spoof_do_proc_readlink(path->dentry->d_inode, tmp, min_t(int, buflen, PAGE_SIZE))) {
-			len = strlen(tmp);
-			if (copy_to_user(buffer, tmp, len))
-				len = -EFAULT;
+		len = vndfs_open_redirect_spoof_do_proc_readlink(path->dentry->d_inode, tmp, PAGE_SIZE);
+		if (len != -ENOENT) {
+			if (len >= 0) {
+				len = min(len, buflen);
+				if (copy_to_user(buffer, tmp, len))
+					len = -EFAULT;
+			}
 			goto out;
 		}
 	}
@@ -2255,7 +2258,13 @@ proc_map_files_readdir(struct file *file, struct dir_context *ctx)
 	 */
 
 	for (vma = mm->mmap, pos = 2; vma; vma = vma->vm_next) {
-		if (vma->vm_file && ++pos > ctx->pos)
+		if (!vma->vm_file)
+			continue;
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+		if (VNDFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))
+			continue;
+#endif
+		if (++pos > ctx->pos)
 			nr_files++;
 	}
 
@@ -2276,9 +2285,9 @@ proc_map_files_readdir(struct file *file, struct dir_context *ctx)
 			if (!vma->vm_file)
 				continue;
 #ifdef CONFIG_KSU_SUSFS_SUS_MAP
-		if (VNDFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))
-			continue;
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+			if (VNDFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))
+				continue;
+#endif
 			if (++pos <= ctx->pos)
 				continue;
 
@@ -2288,6 +2297,7 @@ proc_map_files_readdir(struct file *file, struct dir_context *ctx)
 			if (flex_array_put(fa, i++, &info, GFP_KERNEL))
 				BUG();
 		}
+		nr_files = i;
 	}
 	mmap_read_unlock(mm);
 	mmput(mm);

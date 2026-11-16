@@ -8,6 +8,7 @@
 #include <linux/list.h>
 #include <linux/init_task.h>
 #include <linux/mutex.h>
+#include <linux/spinlock.h>
 #include <linux/seqlock.h>
 #include <linux/stat.h>
 #include <linux/uaccess.h>
@@ -349,7 +350,9 @@ static unsigned long sus_path_uid_filter_generation;
  */
 static char *vndfs_sus_path_app_strings = NULL;
 /* Ensures that there is only one resolving thread running at the same time */
-static atomic_t vndfs_sus_path_app_strings_running = ATOMIC_INIT(0);
+static DEFINE_SPINLOCK(vndfs_sus_path_app_strings_lock);
+static bool vndfs_sus_path_app_strings_running;
+static bool vndfs_sus_path_app_strings_pending;
 
 /*
  * Checks whether the given string is a valid app package name.
@@ -657,7 +660,7 @@ out_copy_to_user:
  * so that the filter stays up to date when the apps are installed or
  * uninstalled, because the uid of an app changes when it is reinstalled.
  */
-static int vndfs_sus_path_app_strings_worker(void *data) {
+static int vndfs_sus_path_app_strings_resolve(void *data) {
 	struct vndfs_sus_path_uid_filter_bitmap *new_bitmap = NULL;
 	struct vndfs_sus_path_uid_filter_bitmap *old_bitmap = NULL;
 	struct cred *orig_cred = NULL;
@@ -729,7 +732,6 @@ out:
 		kfree(new_bitmap);
 	if (app_strings)
 		kvfree(app_strings);
-	atomic_set(&vndfs_sus_path_app_strings_running, 0);
 
 	return ret;
 }
@@ -739,13 +741,41 @@ out:
  * because the resolving of the uids requires the KernelSU selinux domain,
  * which must not be applied to the calling process.
  */
-void vndfs_parse_sus_path_app_strings(void) {
-	/* do not spawn a new thread if there is already one running */
-	if (atomic_cmpxchg(&vndfs_sus_path_app_strings_running, 0, 1))
+static int vndfs_sus_path_app_strings_worker(void *data)
+{
+	unsigned long flags;
+
+	for (;;) {
+		spin_lock_irqsave(&vndfs_sus_path_app_strings_lock, flags);
+		if (!vndfs_sus_path_app_strings_pending) {
+			vndfs_sus_path_app_strings_running = false;
+			spin_unlock_irqrestore(&vndfs_sus_path_app_strings_lock, flags);
+			return 0;
+		}
+		vndfs_sus_path_app_strings_pending = false;
+		spin_unlock_irqrestore(&vndfs_sus_path_app_strings_lock, flags);
+		vndfs_sus_path_app_strings_resolve(data);
+	}
+}
+
+void vndfs_parse_sus_path_app_strings(void)
+{
+	unsigned long flags;
+
+	/* Retain an overlapping request; the worker consumes it on another pass. */
+	spin_lock_irqsave(&vndfs_sus_path_app_strings_lock, flags);
+	vndfs_sus_path_app_strings_pending = true;
+	if (vndfs_sus_path_app_strings_running) {
+		spin_unlock_irqrestore(&vndfs_sus_path_app_strings_lock, flags);
 		return;
+	}
+	vndfs_sus_path_app_strings_running = true;
+	spin_unlock_irqrestore(&vndfs_sus_path_app_strings_lock, flags);
 
 	if (IS_ERR(kthread_run(vndfs_sus_path_app_strings_worker, NULL, "vndfs_spuid_appstr"))) {
-		atomic_set(&vndfs_sus_path_app_strings_running, 0);
+		spin_lock_irqsave(&vndfs_sus_path_app_strings_lock, flags);
+		vndfs_sus_path_app_strings_running = false;
+		spin_unlock_irqrestore(&vndfs_sus_path_app_strings_lock, flags);
 		VNDFS_LOGE("failed to create the thread vndfs_sus_path_app_strings\n");
 	}
 }
@@ -1792,14 +1822,11 @@ int vndfs_open_redirect_spoof_do_proc_readlink(struct inode *inode, char *tmp_bu
 		{
 			VNDFS_LOGI("spoof path '%s' to '%s'\n",
 					entry->info.target_pathname, entry->info.redirected_pathname);
-			if (strlen(entry->info.redirected_pathname) >= buflen) {
-				VNDFS_LOGE("buflen not big enough\n");
-				srcu_read_unlock(&vndfs_srcu_open_redirect, srcu_idx);
-				return -ENAMETOOLONG;
-			}
-			strscpy(tmp_buf, entry->info.redirected_pathname, VNDFS_MAX_LEN_PATHNAME - 1);
+			int len = min_t(size_t, buflen, strlen(entry->info.redirected_pathname));
+
+			memcpy(tmp_buf, entry->info.redirected_pathname, len);
 			srcu_read_unlock(&vndfs_srcu_open_redirect, srcu_idx);
-			return 0;
+			return len;
 		}
 	}
 	srcu_read_unlock(&vndfs_srcu_open_redirect, srcu_idx);
@@ -1900,7 +1927,9 @@ static unsigned long priority_uid_filter_generation;
  */
 static char *vndfs_priority_app_strings = NULL;
 /* Ensures that there is only one resolving thread running at the same time */
-static atomic_t vndfs_priority_app_strings_running = ATOMIC_INIT(0);
+static DEFINE_SPINLOCK(vndfs_priority_app_strings_lock);
+static bool vndfs_priority_app_strings_running;
+static bool vndfs_priority_app_strings_pending;
 
 /*
  * Checks whether the given string is a valid app package name.
@@ -2208,7 +2237,7 @@ out_copy_to_user:
  * so that the filter stays up to date when the apps are installed or
  * uninstalled, because the uid of an app changes when it is reinstalled.
  */
-static int vndfs_priority_app_strings_worker(void *data) {
+static int vndfs_priority_app_strings_resolve(void *data) {
 	struct vndfs_priority_uid_filter_bitmap *new_bitmap = NULL;
 	struct vndfs_priority_uid_filter_bitmap *old_bitmap = NULL;
 	struct cred *orig_cred = NULL;
@@ -2280,7 +2309,6 @@ out:
 		kfree(new_bitmap);
 	if (app_strings)
 		kvfree(app_strings);
-	atomic_set(&vndfs_priority_app_strings_running, 0);
 
 	return ret;
 }
@@ -2290,13 +2318,41 @@ out:
  * because the resolving of the uids requires the KernelSU selinux domain,
  * which must not be applied to the calling process.
  */
-void vndfs_parse_priority_app_strings(void) {
-	/* do not spawn a new thread if there is already one running */
-	if (atomic_cmpxchg(&vndfs_priority_app_strings_running, 0, 1))
+static int vndfs_priority_app_strings_worker(void *data)
+{
+	unsigned long flags;
+
+	for (;;) {
+		spin_lock_irqsave(&vndfs_priority_app_strings_lock, flags);
+		if (!vndfs_priority_app_strings_pending) {
+			vndfs_priority_app_strings_running = false;
+			spin_unlock_irqrestore(&vndfs_priority_app_strings_lock, flags);
+			return 0;
+		}
+		vndfs_priority_app_strings_pending = false;
+		spin_unlock_irqrestore(&vndfs_priority_app_strings_lock, flags);
+		vndfs_priority_app_strings_resolve(data);
+	}
+}
+
+void vndfs_parse_priority_app_strings(void)
+{
+	unsigned long flags;
+
+	/* Retain an overlapping request; the worker consumes it on another pass. */
+	spin_lock_irqsave(&vndfs_priority_app_strings_lock, flags);
+	vndfs_priority_app_strings_pending = true;
+	if (vndfs_priority_app_strings_running) {
+		spin_unlock_irqrestore(&vndfs_priority_app_strings_lock, flags);
 		return;
+	}
+	vndfs_priority_app_strings_running = true;
+	spin_unlock_irqrestore(&vndfs_priority_app_strings_lock, flags);
 
 	if (IS_ERR(kthread_run(vndfs_priority_app_strings_worker, NULL, "vndfs_gpsp_appstr"))) {
-		atomic_set(&vndfs_priority_app_strings_running, 0);
+		spin_lock_irqsave(&vndfs_priority_app_strings_lock, flags);
+		vndfs_priority_app_strings_running = false;
+		spin_unlock_irqrestore(&vndfs_priority_app_strings_lock, flags);
 		VNDFS_LOGE("failed to create the thread vndfs_priority_app_strings\n");
 	}
 }
