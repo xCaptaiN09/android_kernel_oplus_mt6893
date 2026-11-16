@@ -211,6 +211,7 @@ struct st_vndfs_version {
 /* sus_path */
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 bool vndfs_is_inode_sus_path(struct inode *inode);
+bool vndfs_is_current_sus_path_filtered(void);
 void vndfs_add_sus_path(void __user **user_info);
 void vndfs_add_sus_path_loop(void __user **user_info);
 void vndfs_run_sus_path_loop(void);

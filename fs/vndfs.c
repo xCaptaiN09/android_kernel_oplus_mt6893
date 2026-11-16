@@ -143,7 +143,6 @@ static void vndfs_restore_creds(struct cred *orig_cred) {
 DEFINE_STATIC_SRCU(vndfs_srcu_sus_path_loop);
 static DEFINE_MUTEX(vndfs_mutex_lock_sus_path);
 static LIST_HEAD(LH_SUS_PATH_LOOP);
-const struct qstr vndfs_fake_qstr_name = QSTR_INIT("..5.u.S", 7); // used to re-test the dcache lookup, make sure you don't have file named like this!!
 
 void vndfs_add_sus_path(void __user **user_info) {
 	struct st_vndfs_sus_path info = {0};
@@ -284,6 +283,13 @@ void vndfs_run_sus_path_loop(void) {
 
 
 bool vndfs_is_uid_allowed_for_sus_path(uid_t uid);
+
+bool vndfs_is_current_sus_path_filtered(void)
+{
+	uid_t uid = current_uid().val % 100000;
+
+	return uid >= 10000 && !vndfs_is_uid_allowed_for_sus_path(uid);
+}
 
 __attribute__((hot)) bool vndfs_is_inode_sus_path(struct inode *inode)
 {
