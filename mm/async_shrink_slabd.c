@@ -153,7 +153,7 @@ static int kshrink_slabd_func(void *p)
 	current->flags |= PF_MEMALLOC | PF_SWAPWRITE | PF_KSWAPD;
 	set_freezable();
 
-	while (!kthread_should_stop()) {
+	for (;;) {
 		struct reclaim_state reclaim_state = {};
 		unsigned long flags;
 
