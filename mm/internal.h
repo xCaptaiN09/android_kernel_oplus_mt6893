@@ -101,6 +101,7 @@ extern unsigned long highest_memmap_pfn;
  */
 extern int isolate_lru_page(struct page *page);
 extern void putback_lru_page(struct page *page);
+extern unsigned long reclaim_pages(struct list_head *page_list);
 
 /*
  * in mm/rmap.c:
