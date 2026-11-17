@@ -45,40 +45,53 @@ extern unsigned long shrink_slab(gfp_t gfp_mask, int nid,
 				 struct mem_cgroup *memcg,
 				 int priority);
 
-static bool async_shrink_slabd_setup = false;
-wait_queue_head_t shrink_slabd_wait;
-struct async_slabd_parameter {
-	gfp_t shrink_slabd_gfp_mask;
-	int shrink_slabd_nid;
-	struct mem_cgroup *shrink_slabd_memcg;
-	int shrink_slabd_priority;
-	int shrink_slabd_runnable;
+static bool async_shrink_slabd_setup;
+static DECLARE_WAIT_QUEUE_HEAD(shrink_slabd_wait);
+static DEFINE_SPINLOCK(shrink_slabd_lock);
+
+/* One request is owned by the worker until its memcg reference is dropped. */
+static struct async_slabd_parameter {
+	gfp_t gfp_mask;
+	int nid;
+	struct mem_cgroup *memcg;
+	int priority;
+	bool busy;
 } asp;
 
-static struct task_struct *shrink_slabd_tsk = NULL;
-static struct reclaim_state async_reclaim_state = {
-	.reclaimed_slab = 0,
-};
+static struct task_struct *shrink_slabd_tsk;
+/* Completed global-reclaim slab pages, never shrinker object counts. */
+static atomic_long_t completed_slab_pages[MAX_NUMNODES];
+
+unsigned long async_shrink_slabd_reclaimed(int nid)
+{
+	return atomic_long_xchg(&completed_slab_pages[nid], 0);
+}
 
 bool wakeup_shrink_slabd(gfp_t gfp_mask, int nid,
-				 struct mem_cgroup *memcg,
-				 int priority, struct reclaim_state *reclaim_state)
+			 struct mem_cgroup *memcg, int priority)
 {
-	if (unlikely(!async_shrink_slabd_setup))
+	unsigned long flags;
+
+	/* Pairs with init's release of the worker pointer. */
+	if (unlikely(!smp_load_acquire(&async_shrink_slabd_setup)))
 		return false;
 
-	if (asp.shrink_slabd_runnable == 1)
-		return true;
-
-	async_reclaim_state.reclaimed_slab = 0;
-	current->reclaim_state = reclaim_state = &async_reclaim_state;
-
-	asp.shrink_slabd_gfp_mask = gfp_mask;
-	asp.shrink_slabd_nid = nid;
-	asp.shrink_slabd_memcg = memcg;
-	asp.shrink_slabd_priority = priority;
-
-	asp.shrink_slabd_runnable = 1;
+	spin_lock_irqsave(&shrink_slabd_lock, flags);
+	if (asp.busy) {
+		spin_unlock_irqrestore(&shrink_slabd_lock, flags);
+		return false;
+	}
+#ifdef CONFIG_MEMCG
+	/* The iterator's reference may disappear as soon as we return. */
+	if (memcg)
+		css_get(&memcg->css);
+#endif
+	asp.gfp_mask = gfp_mask;
+	asp.nid = nid;
+	asp.memcg = memcg;
+	asp.priority = priority;
+	WRITE_ONCE(asp.busy, true);
+	spin_unlock_irqrestore(&shrink_slabd_lock, flags);
 	wake_up_interruptible(&shrink_slabd_wait);
 
 	return true;
@@ -93,7 +106,8 @@ void set_async_slabd_cpus(void)
 	struct cpufreq_policy *policy_max;
 	static bool set_slabd_cpus_success = false;
 
-	if (unlikely(!async_shrink_slabd_setup))
+	/* Pairs with init's release of the worker pointer. */
+	if (unlikely(!smp_load_acquire(&async_shrink_slabd_setup)))
 		return;
 
 	if (likely(set_slabd_cpus_success))
@@ -139,27 +153,38 @@ static int kshrink_slabd_func(void *p)
 	current->flags |= PF_MEMALLOC | PF_SWAPWRITE | PF_KSWAPD;
 	set_freezable();
 
-	current->reclaim_state = &async_reclaim_state;
-	asp.shrink_slabd_gfp_mask = 0;
-	asp.shrink_slabd_nid = 0;
-	asp.shrink_slabd_memcg = NULL;
-	asp.shrink_slabd_priority = 0;
-	asp.shrink_slabd_runnable = 0;
-
 	while (!kthread_should_stop()) {
+		struct reclaim_state reclaim_state = {};
+		unsigned long flags;
+
 		wait_event_freezable(shrink_slabd_wait,
-					(asp.shrink_slabd_runnable > 0));
+				     READ_ONCE(asp.busy) || kthread_should_stop());
+		spin_lock_irqsave(&shrink_slabd_lock, flags);
+		if (!asp.busy) {
+			spin_unlock_irqrestore(&shrink_slabd_lock, flags);
+			if (kthread_should_stop())
+				break;
+			continue;
+		}
+		gfp_mask = asp.gfp_mask;
+		nid = asp.nid;
+		priority = asp.priority;
+		memcg = asp.memcg;
+		spin_unlock_irqrestore(&shrink_slabd_lock, flags);
 
 		set_async_slabd_cpus();
-
-		gfp_mask = asp.shrink_slabd_gfp_mask;
-		nid = asp.shrink_slabd_nid;
-		priority = asp.shrink_slabd_priority;
-		memcg = asp.shrink_slabd_memcg;
-
+		current->reclaim_state = &reclaim_state;
 		shrink_slab(gfp_mask, nid, memcg, priority);
+		current->reclaim_state = NULL;
 
-		asp.shrink_slabd_runnable = 0;
+		/* SLAB/SLUB account freed pages in reclaim_state, not objects. */
+		atomic_long_add(reclaim_state.reclaimed_slab,
+				&completed_slab_pages[nid]);
+		mem_cgroup_put(memcg);
+
+		spin_lock_irqsave(&shrink_slabd_lock, flags);
+		WRITE_ONCE(asp.busy, false);
+		spin_unlock_irqrestore(&shrink_slabd_lock, flags);
 	}
 	current->flags &= ~(PF_MEMALLOC | PF_SWAPWRITE | PF_KSWAPD);
 	current->reclaim_state = NULL;
@@ -171,8 +196,6 @@ static int async_shrink_slabd_init(void)
 {
 	int ret;
 
-	init_waitqueue_head(&shrink_slabd_wait);
-
 	shrink_slabd_tsk = kthread_run(kshrink_slabd_func, NULL, "kshrink_slabd");
 	if (IS_ERR_OR_NULL(shrink_slabd_tsk)) {
 		pr_err("Failed to start shrink_slabd on node 0\n");
@@ -181,7 +204,8 @@ static int async_shrink_slabd_init(void)
 		return ret;
 	}
 
-	async_shrink_slabd_setup = true;
+	/* Publish the worker pointer before allowing requests. */
+	smp_store_release(&async_shrink_slabd_setup, true);
 	return 0;
 }
 module_init(async_shrink_slabd_init);

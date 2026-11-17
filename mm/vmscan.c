@@ -3860,36 +3860,28 @@ static void walk_mm(struct lruvec *lruvec, struct mm_struct *mm, struct lru_gen_
 	} while (err == -EAGAIN && walk->next_addr && !mm_is_oom_victim(mm));
 }
 
-static struct lru_gen_mm_walk *alloc_mm_walk(void)
+static struct lru_gen_mm_walk *alloc_mm_walk(bool *owned)
 {
 	struct lru_gen_mm_walk *walk;
 
+	*owned = false;
 	if (current->reclaim_state && current->reclaim_state->mm_walk)
 		return current->reclaim_state->mm_walk;
 
 	walk = kzalloc(sizeof(struct lru_gen_mm_walk),
 		       GFP_KERNEL | __GFP_NOMEMALLOC | __GFP_NOWARN);
-	if (walk)
+	if (walk) {
 		walk->from_kzalloc = true;
+		*owned = true;
+	}
 
 	return walk;
 }
 
-static void free_mm_walk(struct lru_gen_mm_walk *walk)
+static void free_mm_walk(struct lru_gen_mm_walk *walk, bool owned)
 {
-	/*
-	 * Free only what alloc_mm_walk() actually allocated from the slab.
-	 *
-	 * reclaim_state->mm_walk may point at pgdat->mm_walk, which is
-	 * embedded in pg_data_t and therefore lives in the vzalloc'd node
-	 * memory, not on the slab. Testing it against
-	 * current->reclaim_state is not safe: that pointer is cleared by
-	 * lru_gen_age_node() on the way out and is absent entirely during
-	 * direct reclaim (try_to_free_pages), so the check can conclude the
-	 * embedded walk was heap allocated and kfree() an address that has
-	 * no slab page behind it -> data abort in kfree().
-	 */
-	if (walk && walk->from_kzalloc)
+	/* A borrowed heap walk belongs to its caller; embedded walks are never freed. */
+	if (owned && walk && walk->from_kzalloc)
 		kfree(walk);
 }
 
@@ -4004,6 +3996,7 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
 			       struct scan_control *sc, bool can_swap, bool full_scan)
 {
 	bool success;
+	bool owned;
 	struct lru_gen_mm_walk *walk;
 	struct mm_struct *mm = NULL;
 	struct lru_gen_struct *lrugen = &lruvec->lrugen;
@@ -4021,7 +4014,7 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
 		goto done;
 	}
 
-	walk = alloc_mm_walk();
+	walk = alloc_mm_walk(&owned);
 	if (!walk) {
 		success = iterate_mm_list_nowalk(lruvec, max_seq);
 		goto done;
@@ -4040,7 +4033,7 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
 		cond_resched();
 	} while (mm);
 
-	free_mm_walk(walk);
+	free_mm_walk(walk, owned);
 done:
 	if (!success) {
 		if (!current_is_kswapd() && !sc->priority)
@@ -5270,6 +5263,8 @@ static ssize_t lru_gen_seq_write(struct file *file, const char __user *src,
 	unsigned int flags;
 	int err = 0;
 	struct reclaim_state rs = {};
+	struct reclaim_state *old_reclaim_state = current->reclaim_state;
+	bool owned;
 	struct scan_control sc = {
 		.may_writepage = true,
 		.may_unmap = true,
@@ -5290,7 +5285,7 @@ static ssize_t lru_gen_seq_write(struct file *file, const char __user *src,
 	next = buf;
 	next[len] = '\0';
 
-	rs.mm_walk = alloc_mm_walk();
+	rs.mm_walk = alloc_mm_walk(&owned);
 	if (!rs.mm_walk) {
 		kvfree(buf);
 		return -ENOMEM;
@@ -5326,9 +5321,9 @@ static ssize_t lru_gen_seq_write(struct file *file, const char __user *src,
 	}
 
 	memalloc_noreclaim_restore(flags);
-	current->reclaim_state = NULL;
+	current->reclaim_state = old_reclaim_state;
 
-	free_mm_walk(rs.mm_walk);
+	free_mm_walk(rs.mm_walk, owned);
 	kvfree(buf);
 
 	return err ? : len;
@@ -5731,9 +5726,9 @@ static bool shrink_node(pg_data_t *pgdat, struct scan_control *sc)
 			shrink_node_memcg(pgdat, memcg, sc, &lru_pages);
 			node_lru_pages += lru_pages;
 
-			shrink_slab_async_sucess = wakeup_shrink_slabd(sc->gfp_mask,
-							pgdat->node_id,
-							memcg, sc->priority, reclaim_state);
+			shrink_slab_async_sucess = global_reclaim(sc) &&
+				wakeup_shrink_slabd(sc->gfp_mask, pgdat->node_id,
+						    memcg, sc->priority);
 			if (unlikely(!shrink_slab_async_sucess))
 				shrink_slab(sc->gfp_mask, pgdat->node_id,
 							memcg, sc->priority);
@@ -5759,6 +5754,10 @@ static bool shrink_node(pg_data_t *pgdat, struct scan_control *sc)
 				break;
 			}
 		} while ((memcg = mem_cgroup_iter(root, memcg, &reclaim)));
+
+		/* Async credits belong to this node's global reclaim only. */
+		if (global_reclaim(sc))
+			sc->nr_reclaimed += async_shrink_slabd_reclaimed(pgdat->node_id);
 
 		if (reclaim_state) {
 			sc->nr_reclaimed += reclaim_state->reclaimed_slab;
@@ -6612,8 +6611,13 @@ static int balance_pgdat(pg_data_t *pgdat, int order, int classzone_idx)
 
 	if (!sc.nr_reclaimed) {
 		count_vm_event(LRU_KSWAPD_NO_PROGRESS);
-		if (!lru_gen_enabled())
-			pgdat->kswapd_failures++;
+		pgdat->kswapd_failures++;
+		/* The threshold also releases GFP_FS allocators on this queue. */
+		if (pgdat->kswapd_failures >= MAX_RECLAIM_RETRIES)
+			wake_up_all(&pgdat->pfmemalloc_wait);
+	} else {
+		/* Includes progress from soft-limit reclaim. */
+		pgdat->kswapd_failures = 0;
 	}
 
 out:
