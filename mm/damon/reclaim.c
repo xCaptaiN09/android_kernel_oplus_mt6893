@@ -269,7 +269,7 @@ static bool get_monitoring_region(unsigned long *start, unsigned long *end)
 	return true;
 }
 
-static struct damos *damon_reclaim_new_scheme(void)
+static struct damos *damon_reclaim_new_scheme(unsigned long aggr_interval)
 {
 	struct damos_watermarks wmarks = {
 		.metric = wmarks_metric,
@@ -340,7 +340,7 @@ static int damon_reclaim_turn(bool on)
 	damon_add_region(region, target);
 
 	/* Will be freed by 'damon_set_schemes()' below */
-	scheme = damon_reclaim_new_scheme();
+	scheme = damon_reclaim_new_scheme(ctx->aggr_interval);
 	if (!scheme) {
 		err = -ENOMEM;
 		goto free_region_out;
