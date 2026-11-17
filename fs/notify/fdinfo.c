@@ -15,7 +15,6 @@
 #include <linux/exportfs.h>
 #ifdef CONFIG_KSU_SUSFS
 #include <linux/vndfs_def.h>
-#include "../mount.h"
 #endif // #ifdef CONFIG_KSU_SUSFS
 
 #include "inotify/inotify.h"
