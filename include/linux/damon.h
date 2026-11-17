@@ -473,6 +473,11 @@ static inline struct damon_region *damon_last_region(struct damon_target *t)
 
 #ifdef CONFIG_DAMON
 
+extern int wmarks_metric;
+extern unsigned long nr_reclaim_time;
+extern unsigned long nr_reclaim_page;
+extern unsigned long nr_damon_region;
+
 struct damon_region *damon_new_region(unsigned long start, unsigned long end);
 /*
  * Add a region between two other regions

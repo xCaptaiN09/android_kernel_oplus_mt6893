@@ -320,6 +320,9 @@ void clear_shadow_from_swap_cache(int type, unsigned long begin,
 {
 	unsigned long curr = begin;
 
+	if (begin > end)
+		return;
+
 	for (;;) {
 		void *item;
 		void __rcu **slot;
@@ -330,22 +333,22 @@ void clear_shadow_from_swap_cache(int type, unsigned long begin,
 		xa_lock_irq(&address_space->i_pages);
 		radix_tree_for_each_slot(slot, &address_space->i_pages,
 					 &iter, curr) {
+			if (iter.index > end)
+				break;
 			item = radix_tree_deref_slot_protected(slot,
 					&address_space->i_pages.xa_lock);
 			if (radix_tree_exceptional_entry(item))
 				radix_tree_iter_delete(&address_space->i_pages,
 						       &iter, slot);
-			if (iter.next_index > end)
-				break;
 		}
 		xa_unlock_irq(&address_space->i_pages);
 
-		/* search the next swapcache until we meet end */
-		curr >>= SWAP_ADDRESS_SPACE_SHIFT;
-		curr++;
-		curr <<= SWAP_ADDRESS_SPACE_SHIFT;
-		if (curr > end)
+		/* Stop before incrementing the final partition, avoiding overflow. */
+		if ((curr >> SWAP_ADDRESS_SPACE_SHIFT) ==
+		    (end >> SWAP_ADDRESS_SPACE_SHIFT))
 			break;
+		curr = ((curr >> SWAP_ADDRESS_SPACE_SHIFT) + 1) <<
+			SWAP_ADDRESS_SPACE_SHIFT;
 	}
 }
 

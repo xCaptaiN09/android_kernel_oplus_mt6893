@@ -28,10 +28,11 @@ static unsigned long last_metric;
 static unsigned long active_interval;
 static unsigned long active_cnt;
 
-extern int wmarks_metric;
-extern unsigned long nr_reclaim_time;
-extern unsigned long nr_reclaim_page;
-extern unsigned long nr_damon_region;
+/* Also used when DAMON_RECLAIM is not built. */
+int wmarks_metric __read_mostly = 2;
+unsigned long nr_reclaim_time __read_mostly;
+unsigned long nr_reclaim_page __read_mostly;
+unsigned long nr_damon_region __read_mostly;
 
 /* Should be called under damon_ops_lock with id smaller than NR_DAMON_OPS */
 static bool damon_registered_ops_id(enum damon_ops_id id)
@@ -334,6 +335,9 @@ int damon_set_attrs(struct damon_ctx *ctx, unsigned long sample_int,
 		    unsigned long aggr_int, unsigned long ops_upd_int,
 		    unsigned long min_nr_reg, unsigned long max_nr_reg)
 {
+	if (!sample_int || !aggr_int || sample_int > aggr_int)
+		return -EINVAL;
+
 	if (min_nr_reg < 3)
 		return -EINVAL;
 

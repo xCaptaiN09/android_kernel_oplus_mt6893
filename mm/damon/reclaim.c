@@ -86,7 +86,6 @@ module_param(quota_reset_interval_ms, ulong, 0664);
  * 2 = DAMOS_WMARK_OPLUS          // often
  * 3 = DAMOS_WMARK_SLEEP          // never
  */
-int wmarks_metric __read_mostly = 2;
 module_param(wmarks_metric, int, 0664);
 
 /*
@@ -228,19 +227,17 @@ module_param(nr_quota_exceeds, ulong, 0400);
 
 static struct damon_ctx *ctx;
 static struct damon_target *target;
+static bool damon_reclaim_initialized;
 
 struct damon_reclaim_ram_walk_arg {
 	unsigned long start;
 	unsigned long end;
 };
 
-unsigned long nr_reclaim_time __read_mostly;
 module_param(nr_reclaim_time, ulong, 0400);
 
-unsigned long nr_reclaim_page __read_mostly;
 module_param(nr_reclaim_page, ulong, 0400);
 
-unsigned long nr_damon_region __read_mostly;
 module_param(nr_damon_region, ulong, 0400);
 
 static int walk_system_ram(struct resource *res, void *arg)
@@ -263,11 +260,12 @@ static bool get_monitoring_region(unsigned long *start, unsigned long *end)
 	struct damon_reclaim_ram_walk_arg arg = {};
 
 	walk_system_ram_res(0, ULONG_MAX, &arg, walk_system_ram);
-	if (arg.end <= arg.start)
+	if (arg.end <= arg.start || arg.end == ULONG_MAX)
 		return false;
 
 	*start = arg.start;
-	*end = arg.end;
+	/* Resources include the last byte; DAMON ranges exclude it. */
+	*end = arg.end + 1;
 	return true;
 }
 
@@ -328,7 +326,8 @@ static int damon_reclaim_turn(bool on)
 	if (err)
 		return err;
 
-	if (monitor_region_start > monitor_region_end)
+	if (monitor_region_start >= monitor_region_end &&
+	    (monitor_region_start || monitor_region_end))
 		return -EINVAL;
 	if (!monitor_region_start && !monitor_region_end &&
 			!get_monitoring_region(&monitor_region_start,
@@ -392,7 +391,8 @@ static int enabled_store(const char *val,
 	if (rc < 0)
 		return rc;
 
-	if (enabled)
+	/* Boot parameter parsing precedes context and workqueue setup. */
+	if (READ_ONCE(damon_reclaim_initialized))
 		schedule_delayed_work(&damon_reclaim_timer, 0);
 
 	return 0;
@@ -433,18 +433,23 @@ static int __init damon_reclaim_init(void)
 	if (!ctx)
 		return -ENOMEM;
 
-	if (damon_select_ops(ctx, DAMON_OPS_PADDR))
+	if (damon_select_ops(ctx, DAMON_OPS_PADDR)) {
+		damon_destroy_ctx(ctx);
+		ctx = NULL;
 		return -EINVAL;
+	}
 
 	ctx->callback.after_aggregation = damon_reclaim_after_aggregation;
 
 	target = damon_new_target();
 	if (!target) {
 		damon_destroy_ctx(ctx);
+		ctx = NULL;
 		return -ENOMEM;
 	}
 	damon_add_target(ctx, target);
 
+	WRITE_ONCE(damon_reclaim_initialized, true);
 	schedule_delayed_work(&damon_reclaim_timer, 0);
 	return 0;
 }
