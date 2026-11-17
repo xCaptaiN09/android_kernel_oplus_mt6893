@@ -386,13 +386,8 @@ put_name:
 	lower_path.mnt = mntget(lower_dir_mnt);
 	sdcardfs_set_lower_path(dentry, &lower_path);
 
-	/*
-	 * If the intent is to create a file, then don't return an error, so
-	 * the VFS will continue the process of making this negative dentry
-	 * into a positive one.
-	 */
-	if (flags & (LOOKUP_CREATE|LOOKUP_RENAME_TARGET))
-		err = 0;
+	/* A valid negative dentry is a successful lookup, regardless of intent. */
+	err = 0;
 
 out:
 	if (err)
