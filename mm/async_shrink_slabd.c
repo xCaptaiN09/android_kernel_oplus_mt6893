@@ -100,11 +100,8 @@ bool wakeup_shrink_slabd(gfp_t gfp_mask, int nid,
 void set_async_slabd_cpus(void)
 {
 	struct cpumask mask;
-	struct cpumask *cpumask = &mask;
-	pg_data_t *pgdat = NODE_DATA(0);
-	unsigned int cpu = 0, cpufreq_max_tmp = 0;
-	struct cpufreq_policy *policy_max;
-	static bool set_slabd_cpus_success = false;
+	unsigned int cpu, max_freq = 0;
+	static bool set_slabd_cpus_success;
 
 	/* Pairs with init's release of the worker pointer. */
 	if (unlikely(!smp_load_acquire(&async_shrink_slabd_setup)))
@@ -112,25 +109,25 @@ void set_async_slabd_cpus(void)
 
 	if (likely(set_slabd_cpus_success))
 		return;
+
+	cpumask_clear(&mask);
 	for_each_possible_cpu(cpu) {
 		struct cpufreq_policy *policy = cpufreq_cpu_get(cpu);
 
-		if (policy == NULL)
+		if (!policy)
 			continue;
 
-		if (policy->cpuinfo.max_freq >= cpufreq_max_tmp) {
-			cpufreq_max_tmp = policy->cpuinfo.max_freq;
-			policy_max = policy;
+		if (policy->cpuinfo.max_freq >= max_freq) {
+			max_freq = policy->cpuinfo.max_freq;
+			cpumask_andnot(&mask, cpumask_of_node(0),
+				       policy->related_cpus);
 		}
+		cpufreq_cpu_put(policy);
 	}
 
-	cpumask_copy(cpumask, cpumask_of_node(pgdat->node_id));
-	cpumask_andnot(cpumask, cpumask, policy_max->related_cpus);
-
-	if (!cpumask_empty(cpumask)) {
-		set_cpus_allowed_ptr(shrink_slabd_tsk, cpumask);
+	if (!cpumask_empty(&mask) &&
+	    !set_cpus_allowed_ptr(shrink_slabd_tsk, &mask))
 		set_slabd_cpus_success = true;
-	}
 }
 
 static int kshrink_slabd_func(void *p)
