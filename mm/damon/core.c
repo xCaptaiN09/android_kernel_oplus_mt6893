@@ -576,7 +576,7 @@ static void kdamond_reset_aggregated(struct damon_ctx *c)
 	}
 }
 
-static void damon_split_region_at(struct damon_ctx *ctx,
+static struct damon_region *damon_split_region_at(struct damon_ctx *ctx,
 		struct damon_target *t, struct damon_region *r,
 		unsigned long sz_r);
 
@@ -604,15 +604,17 @@ static bool damos_valid_target(struct damon_ctx *c, struct damon_target *t,
 
 static void damon_do_apply_schemes(struct damon_ctx *c,
 				   struct damon_target *t,
-				   struct damon_region *r)
+				   struct damon_region *region)
 {
 	struct damos *s;
 
 	damon_for_each_scheme(s, c) {
+		struct damon_region *r = region;
 		struct damos_quota *quota = &s->quota;
 		unsigned long sz = r->ar.end - r->ar.start;
 		struct timespec64 begin, end;
 		unsigned long sz_applied = 0;
+		bool valid;
 
 		if (!s->wmarks.activated)
 			continue;
@@ -625,46 +627,41 @@ static void damon_do_apply_schemes(struct damon_ctx *c,
 		if (quota->charge_target_from) {
 			if (t != quota->charge_target_from)
 				continue;
-			if (r == damon_last_region(t)) {
-				quota->charge_target_from = NULL;
-				quota->charge_addr_from = 0;
+			if (r->ar.end <= quota->charge_addr_from) {
+				if (r == damon_last_region(t)) {
+					quota->charge_target_from = NULL;
+					quota->charge_addr_from = 0;
+				}
 				continue;
 			}
-			if (quota->charge_addr_from &&
-					r->ar.end <= quota->charge_addr_from)
-				continue;
 
-			if (quota->charge_addr_from && r->ar.start <
-					quota->charge_addr_from) {
-				sz = ALIGN_DOWN(quota->charge_addr_from -
-						r->ar.start, DAMON_MIN_REGION);
-				if (!sz) {
-					if (r->ar.end - r->ar.start <=
-							DAMON_MIN_REGION)
-						continue;
-					sz = DAMON_MIN_REGION;
-				}
-				damon_split_region_at(c, t, r, sz);
-				r = damon_next_region(r);
+			if (r->ar.start < quota->charge_addr_from) {
+				sz = quota->charge_addr_from - r->ar.start;
+				r = damon_split_region_at(c, t, r, sz);
+				if (!r)
+					continue;
 				sz = r->ar.end - r->ar.start;
 			}
-			quota->charge_target_from = NULL;
-			quota->charge_addr_from = 0;
 		}
 
-		if (!damos_valid_target(c, t, r, s))
+		valid = damos_valid_target(c, t, r, s);
+		if (valid && c->ops.apply_scheme && quota->esz &&
+				sz > quota->esz - quota->charged_sz) {
+			sz = ALIGN_DOWN(quota->esz - quota->charged_sz,
+					DAMON_MIN_REGION);
+			if (!sz)
+				goto update_stat;
+			if (!damon_split_region_at(c, t, r, sz))
+				continue;
+		}
+
+		quota->charge_target_from = NULL;
+		quota->charge_addr_from = 0;
+		if (!valid)
 			continue;
 
 		/* Apply the scheme */
 		if (c->ops.apply_scheme) {
-			if (quota->esz &&
-					quota->charged_sz + sz > quota->esz) {
-				sz = ALIGN_DOWN(quota->esz - quota->charged_sz,
-						DAMON_MIN_REGION);
-				if (!sz)
-					goto update_stat;
-				damon_split_region_at(c, t, r, sz);
-			}
 			ktime_get_coarse_ts64(&begin);
 			sz_applied = c->ops.apply_scheme(c, t, r, s);
 			ktime_get_coarse_ts64(&end);
@@ -673,7 +670,7 @@ static void damon_do_apply_schemes(struct damon_ctx *c,
 			quota->charged_sz += sz;
 			if (quota->esz && quota->charged_sz >= quota->esz) {
 				quota->charge_target_from = t;
-				quota->charge_addr_from = r->ar.end + 1;
+				quota->charge_addr_from = r->ar.end;
 			}
 		}
 		if (s->action != DAMOS_STAT)
@@ -845,8 +842,10 @@ static void kdamond_merge_regions(struct damon_ctx *c, unsigned int threshold,
  *
  * r		the region to be split
  * sz_r		size of the first sub-region that will be made
+ *
+ * Return: the second sub-region, or NULL if allocation fails.
  */
-static void damon_split_region_at(struct damon_ctx *ctx,
+static struct damon_region *damon_split_region_at(struct damon_ctx *ctx,
 		struct damon_target *t, struct damon_region *r,
 		unsigned long sz_r)
 {
@@ -854,14 +853,16 @@ static void damon_split_region_at(struct damon_ctx *ctx,
 
 	new = damon_new_region(r->ar.start + sz_r, r->ar.end);
 	if (!new)
-		return;
+		return NULL;
 
 	r->ar.end = new->ar.start;
 
+	new->nr_accesses = r->nr_accesses;
 	new->age = r->age;
 	new->last_nr_accesses = r->last_nr_accesses;
 
 	damon_insert_region(new, r, damon_next_region(r), t);
+	return new;
 }
 
 /* Split every region in the given target into 'nr_subs' regions */
