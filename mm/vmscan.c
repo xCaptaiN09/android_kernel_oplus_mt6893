@@ -4946,7 +4946,7 @@ static struct kobj_attribute lru_gen_min_ttl_attr = __ATTR(
 	min_ttl_ms, 0644, show_min_ttl, store_min_ttl
 );
 
-static ssize_t show_enable(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+static unsigned int lru_gen_cap_mask(void)
 {
 	unsigned int caps = 0;
 
@@ -4959,7 +4959,59 @@ static ssize_t show_enable(struct kobject *kobj, struct kobj_attribute *attr, ch
 	if (IS_ENABLED(CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG) && get_cap(LRU_GEN_NONLEAF_YOUNG))
 		caps |= BIT(LRU_GEN_NONLEAF_YOUNG);
 
-	return snprintf(buf, PAGE_SIZE, "0x%04x\n", caps);
+	return caps;
+}
+
+static ssize_t show_enable(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "0x%04x\n", lru_gen_cap_mask());
+}
+
+struct lru_gen_diag_request {
+	unsigned int mask;
+	pid_t pid;
+	char comm[TASK_COMM_LEN];
+};
+
+static DEFINE_MUTEX(lru_gen_diag_lock);
+static unsigned int lru_gen_diag_boot_mask;
+static unsigned int lru_gen_diag_writes;
+static struct lru_gen_diag_request lru_gen_diag_first_disable;
+static struct lru_gen_diag_request lru_gen_diag_last;
+
+static void lru_gen_diag_record(unsigned int mask)
+{
+	struct lru_gen_diag_request request = {
+		.mask = mask,
+		.pid = current->pid,
+	};
+
+	get_task_comm(request.comm, current);
+	mutex_lock(&lru_gen_diag_lock);
+	lru_gen_diag_writes++;
+	lru_gen_diag_last = request;
+	if (!(mask & BIT(LRU_GEN_CORE)) && !lru_gen_diag_first_disable.pid)
+		lru_gen_diag_first_disable = request;
+	mutex_unlock(&lru_gen_diag_lock);
+}
+
+static ssize_t show_diagnostic(struct kobject *kobj, struct kobj_attribute *attr,
+			       char *buf)
+{
+	const struct lru_gen_diag_request *first = &lru_gen_diag_first_disable;
+	const struct lru_gen_diag_request *last = &lru_gen_diag_last;
+	ssize_t len;
+
+	mutex_lock(&lru_gen_diag_lock);
+	len = scnprintf(buf, PAGE_SIZE,
+			"boot_mask=0x%04x\nrequests=%u\n"
+			"first_disable_mask=0x%04x\nfirst_disable_writer=%s[%d]\n"
+			"last_mask=0x%04x\nlast_writer=%s[%d]\n",
+			lru_gen_diag_boot_mask, lru_gen_diag_writes,
+			first->mask, first->pid ? first->comm : "none", first->pid,
+			last->mask, last->pid ? last->comm : "none", last->pid);
+	mutex_unlock(&lru_gen_diag_lock);
+	return len;
 }
 
 static ssize_t store_enable(struct kobject *kobj, struct kobj_attribute *attr,
@@ -4975,6 +5027,7 @@ static ssize_t store_enable(struct kobject *kobj, struct kobj_attribute *attr,
 	else if (kstrtouint(buf, 0, &caps))
 		return -EINVAL;
 
+	lru_gen_diag_record(caps);
 	pr_info("mglru_diag: request=%#x from %s[%d]\n",
 		caps, current->comm, current->pid);
 
@@ -4996,9 +5049,14 @@ static struct kobj_attribute lru_gen_enabled_attr = __ATTR(
 	enabled, 0644, show_enable, store_enable
 );
 
+static struct kobj_attribute lru_gen_diagnostic_attr = __ATTR(
+	diagnostic, 0444, show_diagnostic, NULL
+);
+
 static struct attribute *lru_gen_attrs[] = {
 	&lru_gen_min_ttl_attr.attr,
 	&lru_gen_enabled_attr.attr,
+	&lru_gen_diagnostic_attr.attr,
 	NULL
 };
 
@@ -5407,9 +5465,8 @@ static int __init init_lru_gen(void)
 	BUILD_BUG_ON(BIT(LRU_GEN_WIDTH) <= MAX_NR_GENS);
 	BUILD_BUG_ON(sizeof(MM_STAT_CODES) != NR_MM_STATS + 1);
 
-	pr_info("mglru_diag: before sysfs core=%d walk=%d nonleaf=%d\n",
-		get_cap(LRU_GEN_CORE), get_cap(LRU_GEN_MM_WALK),
-		get_cap(LRU_GEN_NONLEAF_YOUNG));
+	lru_gen_diag_boot_mask = lru_gen_cap_mask();
+	pr_info("mglru_diag: before sysfs mask=%#x\n", lru_gen_diag_boot_mask);
 
 	if (sysfs_create_group(mm_kobj, &lru_gen_attr_group))
 		pr_err("lru_gen: failed to create sysfs group\n");
