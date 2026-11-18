@@ -100,11 +100,6 @@ ui_print " ";
 ui_print "  [1/2] Extracting boot image...";
 split_boot;
 
-# init.rc patch for Color OS 16 / Realme UI cgroup fix
-ui_print "  Applying Realme UI / ColorOS cgroup patch...";
-backup_file init.rc;
-replace_string init.rc "cpuctl cpu,timer_slack" "mount cgroup none /dev/cpuctl cpu" "mount cgroup none /dev/cpuctl cpu,timer_slack";
-
 ui_print "  [2/2] Flashing Image.gz-dtb...";
 flash_boot;
 

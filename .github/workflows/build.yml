@@ -13,6 +13,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    env:
+      FLASHABLE_ZIP: KSU-Next-RUI.zip
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -22,7 +24,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y bc bison build-essential curl flex gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi git gnupg gperf libncurses5-dev libssl-dev python3 zip zlib1g-dev
+        sudo apt-get install -y bc bison build-essential curl flex gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi git gnupg gperf libncurses5-dev libssl-dev python3 unzip zip zlib1g-dev
         sudo apt-get install -y python2 || true
 
     - name: Set up Proton Clang
@@ -36,35 +38,36 @@ jobs:
       run: |
         bash build_kernel.sh
 
-    - name: Show errors on failure
-      if: failure()
-      run: |
-        test -f build.log
-        grep -E "error:|fatal error:" build.log | head -30 || true
-
     - name: Print build log on failure
       if: failure()
       run: |
-        test -f build.log
-        tail -100 build.log
+        if [ -f build.log ]; then
+          grep -m 30 -E "error:|fatal error:" build.log || true
+          tail -100 build.log
+        fi
 
     - name: Upload Image.gz-dtb
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: Image.gz-dtb
         path: out/arch/arm64/boot/Image.gz-dtb
+        if-no-files-found: error
 
-    - name: Create AnyKernel3 Zip
+    - name: Create AnyKernel3 ZIP
       run: |
+        test -s out/arch/arm64/boot/Image.gz-dtb
         git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
         cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
         cp anykernel_template.sh AnyKernel3/anykernel.sh
-        cd AnyKernel3
-        rm -rf .git
-        zip -r9 ../KSU_Next_OP6893_COS16.zip *
+        (
+          cd AnyKernel3
+          zip -r9 "../$FLASHABLE_ZIP" *
+        )
+        unzip -tq "$FLASHABLE_ZIP"
 
-    - name: Upload Flashable Zip
-      uses: actions/upload-artifact@v4
+    - name: Upload Flashable ZIP
+      uses: actions/upload-artifact@v7
       with:
-        name: KSU_Next_OP6893_COS16
-        path: KSU_Next_OP6893_COS16.zip
+        path: ${{ env.FLASHABLE_ZIP }}
+        archive: false
+        if-no-files-found: error

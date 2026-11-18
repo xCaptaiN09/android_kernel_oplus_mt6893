@@ -1,11 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
+script_path=$(realpath -- "${BASH_SOURCE[0]}")
+
 # Configuration
 ARCH=arm64
 SUBARCH=arm64
 DEFCONFIG=cupida_defconfig
-TOOLCHAIN=${TOOLCHAIN:-/home/captain/Projects/toolchain/proton-clang}
+# Resolve caller-relative toolchain paths before changing directories.
+TOOLCHAIN=$(realpath -m -- "${TOOLCHAIN:-/home/captain/Projects/toolchain/proton-clang}")
 KBUILD_BUILD_USER=xCaptaiN09
 KBUILD_BUILD_HOST=NetHunter
 KBUILD_BUILD_TIMESTAMP="Sat Jun 6 12:00:00 UTC 2026"
@@ -26,9 +29,16 @@ if [ ! -x "$CLANG" ]; then
     exit 1
 fi
 
+cd -- "$(dirname -- "$script_path")"
+if [ ! -f Makefile ] || [ ! -f "arch/$ARCH/configs/$DEFCONFIG" ]; then
+    printf 'Incomplete kernel checkout at %s: expected Makefile and arch/%s/configs/%s\n' \
+        "$PWD" "$ARCH" "$DEFCONFIG" >&2
+    exit 1
+fi
+
 # Step 1: Clean out directory
 echo "Cleaning out directory..."
-rm -rf out
+rm -rf -- out
 : > build.log
 
 # Step 2: Configure and build host tools
