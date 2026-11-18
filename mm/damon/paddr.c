@@ -246,10 +246,12 @@ static unsigned long damon_pa_apply_scheme(struct damon_ctx *ctx,
 			put_page(page);
 			continue;
 		}
-		if (PageUnevictable(page))
+		if (PageUnevictable(page)) {
 			putback_lru_page(page);
-		else
+		} else {
+			ClearPageActive(page);
 			list_add(&page->lru, &page_list);
+		}
 		/* Drop the lookup reference; reclaim/putback owns the isolate pin. */
 		put_page(page);
 	}
