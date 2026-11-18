@@ -4975,6 +4975,9 @@ static ssize_t store_enable(struct kobject *kobj, struct kobj_attribute *attr,
 	else if (kstrtouint(buf, 0, &caps))
 		return -EINVAL;
 
+	pr_info("mglru_diag: request=%#x from %s[%d]\n",
+		caps, current->comm, current->pid);
+
 	for (i = 0; i < NR_LRU_GEN_CAPS; i++) {
 		bool enable = caps & BIT(i);
 
@@ -5403,6 +5406,10 @@ static int __init init_lru_gen(void)
 	BUILD_BUG_ON(MIN_NR_GENS + 1 >= MAX_NR_GENS);
 	BUILD_BUG_ON(BIT(LRU_GEN_WIDTH) <= MAX_NR_GENS);
 	BUILD_BUG_ON(sizeof(MM_STAT_CODES) != NR_MM_STATS + 1);
+
+	pr_info("mglru_diag: before sysfs core=%d walk=%d nonleaf=%d\n",
+		get_cap(LRU_GEN_CORE), get_cap(LRU_GEN_MM_WALK),
+		get_cap(LRU_GEN_NONLEAF_YOUNG));
 
 	if (sysfs_create_group(mm_kobj, &lru_gen_attr_group))
 		pr_err("lru_gen: failed to create sysfs group\n");
