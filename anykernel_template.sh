@@ -44,26 +44,56 @@ PATCH_VBMETA_FLAG=auto;
 # import functions/variables and setup patching - see for reference (DO NOT REMOVE)
 . tools/ak3-core.sh;
 
+# Print each banner section together, with a pause at the shared divider.
 ui_print " ";
-ui_print "╔════════════════════════════════════════╗";
-ui_print "║                                        ║";
-ui_print "║            KSU NEXT KERNEL             ║";
-ui_print "║          MT6893 | Linux 4.19           ║";
-ui_print "║                                        ║";
-ui_print "╠════════════════════════════════════════╣";
-ui_print "║                                        ║";
-ui_print "║  Maintainer  xCaptaiN09                ║";
-ui_print "║  Base        OPlus MT6893 4.19         ║";
-ui_print "║  Root        KernelSU Next             ║";
-ui_print "║  SuSFS       v2.1.0                    ║";
-ui_print "║  KPM         External/kpatch           ║";
-ui_print "║                                        ║";
-ui_print "╠════════════════════════════════════════╣";
-ui_print "║                                        ║";
-ui_print "║  Realme X7 Max 5G    RMX3031/cupida    ║";
-ui_print "║  OnePlus Nord 2      DN2101/denniz     ║";
-ui_print "║                                        ║";
-ui_print "╚════════════════════════════════════════╝";
+while IFS= read -r banner_line; do
+  case "$banner_line" in
+    KSU_PAUSE) sleep 1 ;;
+    *) ui_print "$banner_line" ;;
+  esac
+done <<'KSU_BANNER'
+╔════════════════════════════════════════╗
+║                                        ║
+║            ..::......:-==:.            ║
+║         .::..          .-*#+-.         ║
+║       .:.                .*###=.       ║
+║      ::          =**=     :####*:      ║
+║     ::           +##+     :######-     ║
+║    ::             ..      +#######:    ║
+║    -                    .+########+    ║
+║    -               ..:-+###########    ║
+║    -          :=+**################    ║
+║    -        :*####################+    ║
+║    ::      :######**##############:    ║
+║     ::     +#####:  :############-     ║
+║      ::    +#####-..-##########*:      ║
+║       .::. .*#################=.       ║
+║         .::..+*############+-.         ║
+║            ...:=**###**+=:.            ║
+║                                        ║
+║          _  __  ____   _   _           ║
+║         | |/ / / ___| | | | |          ║
+║         | ' /  \___ \ | | | |          ║
+║         | . \   ___) || |_| |          ║
+║         |_|\_\ |____/  \___/           ║
+║                N E X T                 ║
+║                                        ║
+║             KERNELSU NEXT              ║
+║         MT6893  /  Linux 4.19          ║
+╠════════════════════════════════════════╣
+KSU_PAUSE
+║   Maintainer : xCaptaiN09              ║
+║   Base       : OPlus MT6893 4.19       ║
+║   Root       : KernelSU Next           ║
+║   SuSFS      : Included                ║
+╠════════════════════════════════════════╣
+KSU_PAUSE
+║   Realme X7 Max 5G                     ║
+║          RMX3031 / cupida              ║
+║   OnePlus Nord 2                       ║
+║          DN2101 / denniz               ║
+╚════════════════════════════════════════╝
+KSU_BANNER
 ui_print " ";
 
 # boot install
